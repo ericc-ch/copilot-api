@@ -10,11 +10,17 @@ import { pollAccessToken } from "~/services/github/poll-access-token"
 import { HTTPError } from "./http-error"
 import { state } from "./state"
 
+/** Reads the GitHub token from the designated file path. */
 const readGithubToken = () => fs.readFile(PATHS.GITHUB_TOKEN_PATH, "utf8")
 
+/** Writes the GitHub token to the designated file path. */
 const writeGithubToken = (token: string) =>
   fs.writeFile(PATHS.GITHUB_TOKEN_PATH, token)
 
+/**
+ * Fetches the Copilot API token using the GitHub token and sets up
+ * an interval to automatically refresh it before expiration.
+ */
 export const setupCopilotToken = async () => {
   const { token, refresh_in } = await getCopilotToken()
   state.copilotToken = token
@@ -34,9 +40,15 @@ export const setupCopilotToken = async () => {
 }
 
 interface SetupGitHubTokenOptions {
+  /** If true, forces a new authentication flow even if a token exists. */
   force?: boolean
 }
 
+/**
+ * Sets up the GitHub token state.
+ * Reads from file if available, otherwise initiates the device auth flow.
+ * @param options - Configuration options for the setup process.
+ */
 export async function setupGitHubToken(
   options?: SetupGitHubTokenOptions,
 ): Promise<void> {
@@ -74,6 +86,7 @@ export async function setupGitHubToken(
   }
 }
 
+/** Fetches the GitHub user profile and logs the username. */
 async function logUser() {
   const user = await getGitHubUser()
   consola.info(`Logged in as ${user.login}`)

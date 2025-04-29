@@ -9,6 +9,16 @@ This project is a reverse-engineered implementation of the GitHub Copilot API cr
 
 A wrapper around GitHub Copilot API to make it OpenAI compatible, making it usable for other tools like AI assistants, local interfaces, and development utilities.
 
+## Features
+
+- OpenAI Compatible API endpoint (`/v1/chat/completions`)
+- Handles GitHub Copilot authentication (Personal & Business)
+- Fetches available Copilot models (`/v1/models`)
+- Supports streaming responses
+- Automatic message sanitization for improved compatibility
+- Optional manual request approval (`--manual`)
+- Rate limiting (`--rate-limit`, `--wait`)
+
 ## Demo
 
 https://github.com/user-attachments/assets/7654b383-669d-4eb9-b23c-06d7aefee8c5
@@ -159,10 +169,27 @@ When using the `--manual` flag, the server will prompt you to approve each incom
 
 This helps you control usage and monitor requests in real-time.
 
+### Message Sanitization
+
+To ensure compatibility with the underlying Copilot models and prevent errors, the API automatically performs several sanitization steps on incoming messages:
+
+- **Content Flattening:** If message content is an array of parts, it's joined into a single string.
+- **Internal Tag Removal:** Removes internal tags used by some clients (e.g., `<environment_details>` blocks are removed entirely, while `<task>` tags are stripped, preserving the content).
+- **Whitespace Trimming:** Removes leading/trailing whitespace.
+- **Empty Message Filtering:** Discards messages that become empty after sanitization.
+
+This process helps ensure that only valid and clean content is sent to the Copilot service.
+
 ## Roadmap
 
-- [x] Manual authentication flow
-- [x] Manual request approval system
-- [x] Rate limiting implementation
-- [x] Token counting
-- [x] Enhanced error handling and recovery
+- [x] Manual authentication flow (`auth` command)
+- [x] Manual request approval system (`--manual` flag)
+- [x] Rate limiting implementation (`--rate-limit`, `--wait` flags)
+- [x] Token counting (`getTokenCount` utility)
+- [x] Automatic message sanitization (flattening, tag stripping/removal)
+- [x] OpenAI-compatible endpoints for `/chat/completions`, `/models`, `/embeddings`
+- [x] Docker support
+- [x] NPX execution support
+- [ ] Configuration file support (e.g., for API keys, default models)
+- [ ] Caching mechanism for API responses (e.g., models endpoint)
+- [ ] More robust error handling and reporting

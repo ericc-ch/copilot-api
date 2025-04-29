@@ -9,9 +9,12 @@ export const createChatCompletions = async (
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
+  // Prepare headers and include vision request flag
+  const headers = copilotHeaders(state)
+  headers["Copilot-Vision-Request"] = JSON.stringify({ enable: true })
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
     method: "POST",
-    headers: copilotHeaders(state),
+    headers,
     body: JSON.stringify(payload),
   })
 

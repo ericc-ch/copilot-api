@@ -5,6 +5,14 @@ import type { State } from "./state"
 import { HTTPError } from "./http-error"
 import { sleep } from "./sleep"
 
+/**
+ * Checks if the request rate limit has been hit based on the configured
+ * `rateLimitSeconds` and `lastRequestTimestamp` in the global state.
+ * If hit, it either throws a 429 HTTPError or waits (sleeps) before
+ * returning, depending on the `rateLimitWait` state flag.
+ *
+ * @param state - The global application state.
+ */
 export async function checkRateLimit(state: State) {
   if (state.rateLimitSeconds === undefined) return
 
