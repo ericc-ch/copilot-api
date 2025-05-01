@@ -1,5 +1,5 @@
-import { encodeChat } from "gpt-tokenizer"
 import consola from "consola"
+import { encodeChat } from "gpt-tokenizer"
 
 import type { Message } from "~/services/copilot/create-chat-completions"
 
@@ -19,9 +19,12 @@ const sanitizeMessages = (messages: Array<Message>): Array<Message> => {
       // Log a warning if content isn't a string, as this might indicate
       // an issue upstream if it happens often.
       consola.warn(
-        `Message at index ${index} had non-string content during tokenization:`, msg.content)
-      // Convert non-string content to an empty string to prevent errors in encodeChat.
-      return { ...msg, content: String(msg.content ?? "") }
+        `Message at index ${index} had non-string content during tokenization:`,
+        msg.content,
+      )
+      // Convert non-string content to a string to prevent errors in encodeChat.
+      // String() already handles null/undefined by converting to empty string
+      return { ...msg, content: String(msg.content) }
     }
     return msg // Return unchanged if content is already a string.
   })
@@ -39,14 +42,14 @@ export const getTokenCount = (messages: Array<Message>) => {
   const sanitizedMessages = sanitizeMessages(messages)
 
   // Separate messages by role to count input (user/system) and output (assistant).
-  const input = sanitizedMessages.filter((m) => m.role !== "assistant")
-  const output = sanitizedMessages.filter((m) => m.role === "assistant")
+  const inputMessages = sanitizedMessages.filter((m) => m.role !== "assistant")
+  const outputMessages = sanitizedMessages.filter((m) => m.role === "assistant")
 
   // Use encodeChat with a specific model context (e.g., "gpt-4o") to get token arrays.
   // The length of the array approximates the token count.
   // TODO: Consider making the model used for tokenization configurable or dynamically determined.
-  const inputTokens = encodeChat(input, "gpt-4o").length
-  const outputTokens = encodeChat(output, "gpt-4o").length
+  const inputTokens = encodeChat(inputMessages, "gpt-4o").length
+  const outputTokens = encodeChat(outputMessages, "gpt-4o").length
 
   return {
     input: inputTokens,

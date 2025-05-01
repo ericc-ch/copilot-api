@@ -8,7 +8,13 @@ export async function cacheModels(): Promise<void> {
   const models = await getModels()
   state.models = models
 
-  consola.info(
-    `Available models: \n${models.data.map((model) => `- ${model.id}`).join("\n")}`,
-  )
+  if (Array.isArray(models.data)) {
+    // Check if data is an array
+    consola.info(
+      // Map over the data array
+      `Available models: \n${models.data.map((model) => `- ${model.id}`).join("\n")}`,
+    )
+  } else {
+    consola.warn("Could not list models: Invalid response format.")
+  }
 }

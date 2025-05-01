@@ -16,6 +16,7 @@ A wrapper around GitHub Copilot API to make it OpenAI compatible, making it usab
 - Fetches available Copilot models (`/v1/models`)
 - Supports streaming responses
 - Automatic message sanitization for improved compatibility
+- Built-in support for vision requests (via automatic header management)
 - Optional manual request approval (`--manual`)
 - Rate limiting (`--rate-limit`, `--wait`)
 
@@ -173,12 +174,55 @@ This helps you control usage and monitor requests in real-time.
 
 To ensure compatibility with the underlying Copilot models and prevent errors, the API automatically performs several sanitization steps on incoming messages:
 
-- **Content Flattening:** If message content is an array of parts, it's joined into a single string.
-- **Internal Tag Removal:** Removes internal tags used by some clients (e.g., `<environment_details>` blocks are removed entirely, while `<task>` tags are stripped, preserving the content).
-- **Whitespace Trimming:** Removes leading/trailing whitespace.
-- **Empty Message Filtering:** Discards messages that become empty after sanitization.
+1. **Content Flattening:** If message content is an array of parts, it's joined into a single string:
+   ```javascript
+   // Input message with array content
+   { 
+     "role": "user", 
+     "content": [
+       { "type": "text", "text": "Hello" },
+       { "type": "text", "text": " world" }
+     ]
+   }
+   
+   // Converted to:
+   { "role": "user", "content": "Hello world" }
+   ```
 
-This process helps ensure that only valid and clean content is sent to the Copilot service.
+2. **Internal Tag Removal:** 
+   * `<environment_details>` blocks are removed entirely (including content):
+     ```javascript
+     // Input:
+     "start <environment_details>debug info</environment_details> end"
+     
+     // Sanitized to:
+     "start  end"
+     ```
+   * `<task>` tags are stripped while preserving the content within:
+     ```javascript
+     // Input:
+     "<task>actual instruction</task>"
+     
+     // Sanitized to:
+     "actual instruction"
+     ```
+
+3. **Whitespace Trimming:** Removes leading/trailing whitespace from message content.
+
+4. **Empty Message Filtering:** Messages that become empty after sanitization are automatically dropped.
+
+This sanitization process is particularly important for client applications that may use these format variations, ensuring consistent handling and preventing 400 errors from the underlying Copilot API.
+
+### Vision Support
+
+The API automatically adds the required `Copilot-Vision-Request` header (addressing issue #16) to ensure image processing works properly with multimodal models like GPT-4o:
+
+```javascript
+// Header added automatically to all requests
+headers["Copilot-Vision-Request"] = JSON.stringify({ enable: true })
+```
+
+This eliminates the `missing required Copilot-Vision-Request header for vision requests` error that would otherwise occur when sending image content to the models.
 
 ## Roadmap
 
@@ -187,9 +231,11 @@ This process helps ensure that only valid and clean content is sent to the Copil
 - [x] Rate limiting implementation (`--rate-limit`, `--wait` flags)
 - [x] Token counting (`getTokenCount` utility)
 - [x] Automatic message sanitization (flattening, tag stripping/removal)
+- [x] Vision request support (automatic header addition)
 - [x] OpenAI-compatible endpoints for `/chat/completions`, `/models`, `/embeddings`
 - [x] Docker support
 - [x] NPX execution support
+- [ ] Dynamic vision header support (only when vision content detected)
 - [ ] Configuration file support (e.g., for API keys, default models)
 - [ ] Caching mechanism for API responses (e.g., models endpoint)
 - [ ] More robust error handling and reporting
