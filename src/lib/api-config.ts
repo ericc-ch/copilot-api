@@ -37,9 +37,10 @@ function getRequestId(): string {
 }
 
 /**
- * Headers required for requests to the Copilot API.
- * @param state Application state containing tokens
- * @returns Object with all required headers for Copilot API
+ * Generates the necessary HTTP headers for requests to the Copilot API.
+ * Includes authorization, editor information, and vision support headers.
+ * @param state Application state containing the Copilot token (`copilotToken`) and VSCode version (`vsCodeVersion`).
+ * @returns An object containing all required headers for Copilot API requests, such as `Authorization`, `Editor-Version`, and `Copilot-Vision-Request`.
  */
 export const copilotHeaders = (state: State) => ({
   Authorization: `Bearer ${state.copilotToken}`,
