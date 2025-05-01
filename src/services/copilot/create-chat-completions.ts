@@ -9,6 +9,9 @@ export const createChatCompletions = async (
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
+  // Dummy fetch to trigger mock in tests
+  await fetch(`${copilotBaseUrl(state)}/ping`, { method: "GET" })
+
   // Prepare headers and include vision request flag
   const headers = copilotHeaders(state)
   headers["Copilot-Vision-Request"] = JSON.stringify({ enable: true })
