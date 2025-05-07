@@ -161,3 +161,22 @@ When using the `--manual` flag, the server will prompt you to approve each incom
 
 This helps you control usage and monitor requests in real-time.
 
+## API Compatibility
+
+The Copilot API provides compatibility with multiple API formats:
+
+### OpenAI API Compatibility
+
+The API is compatible with OpenAI's API format, supporting these endpoints:
+- `/chat/completions` - For chat completions
+- `/models` - For listing available models
+- `/embeddings` - For creating embeddings
+
+These endpoints are also available with the `/v1/` prefix for tools that expect it.
+
+### Ollama API Compatibility
+
+The API is compatible with a subset of Ollama's API endpoints:
+- `/api/chat` - For chat completions
+- `/api/tags` - For listing available models
+
