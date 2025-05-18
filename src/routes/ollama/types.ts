@@ -21,6 +21,11 @@ export interface OllamaChatPayload {
     seed?: number
   }
   max_tokens?: number
+  /**
+   * OpenAI-compatible tools parameter for function calling.
+   * See: https://platform.openai.com/docs/guides/function-calling
+   */
+  tools?: Array<Record<string, unknown>>
 }
 
 export interface OllamaChatResponse {

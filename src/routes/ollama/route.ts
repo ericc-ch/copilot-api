@@ -140,6 +140,7 @@ function mapOllamaToOpenAIPayload(ollamaPayload: OllamaChatPayload) {
     frequency_penalty: ollamaPayload.options?.frequency_penalty,
     presence_penalty: ollamaPayload.options?.presence_penalty,
     stop: ollamaPayload.options?.stop,
+    tools: ollamaPayload.tools, // Pass tools parameter to OpenAI payload
   }
 }
 
