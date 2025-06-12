@@ -19,7 +19,10 @@ export async function handleCompletion(c: Context) {
 
   let payload = await c.req.json<ChatCompletionsPayload>()
 
-  consola.info("Current token count:", getTokenCount(payload.messages))
+  if(payload.messages) {
+    consola.info("Current token count:", getTokenCount(payload.messages))
+  }
+
 
   if (state.manualApprove) await awaitApproval()
 
@@ -30,7 +33,7 @@ export async function handleCompletion(c: Context) {
 
     payload = {
       ...payload,
-      max_tokens: selectedModel?.capabilities.limits.max_output_tokens,
+      max_tokens: selectedModel?.capabilities?.limits?.max_output_tokens,
     }
   }
 

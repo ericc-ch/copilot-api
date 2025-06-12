@@ -15,9 +15,12 @@ export const createChatCompletions = async (
 
   const visionEnable = payload.messages.some(
     (x) =>
-      typeof x.content !== "string"
+      (x.content && typeof x.content !== "string")
       && x.content.some((x) => x.type === "image_url"),
   )
+
+  // Check if tools are being used
+  const toolsEnable = Boolean(payload.tools && payload.tools.length > 0)
 
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
     method: "POST",
@@ -25,8 +28,19 @@ export const createChatCompletions = async (
     body: JSON.stringify(payload),
   })
 
-  if (!response.ok)
-    throw new HTTPError("Failed to create chat completions", response)
+  if (!response.ok) {
+    const errorText = await response.text()
+
+    // If tools are not supported, provide a helpful error message
+    if (toolsEnable && response.status === 400) {
+      throw new HTTPError(
+        `Failed to create chat completions. GitHub Copilot may not support tool calls. Error: ${errorText}`,
+        response
+      )
+    }
+
+    throw new HTTPError(`Failed to create chat completions: ${errorText}`, response)
+  }
 
   if (payload.stream) {
     return events(response)
@@ -36,8 +50,19 @@ export const createChatCompletions = async (
 }
 
 const intoCopilotMessage = (message: Message) => {
+  // Skip processing for assistant messages (they may have tool_calls)
+  if (message.role === "assistant") return false
+
+  // Skip processing for tool messages (they have specific format)
+  if (message.role === "tool") return false
+
+  // Skip processing for string content
   if (typeof message.content === "string") return false
 
+  // Skip processing for null content
+  if (message.content === null) return false
+
+  // Transform content parts for vision support
   for (const part of message.content) {
     if (part.type === "input_image") part.type = "image_url"
   }
@@ -56,12 +81,23 @@ export interface ChatCompletionChunk {
 interface Delta {
   content?: string
   role?: string
+  tool_calls?: Array<DeltaToolCall>
+}
+
+interface DeltaToolCall {
+  index: number
+  id?: string
+  type?: "function"
+  function?: {
+    name?: string
+    arguments?: string
+  }
 }
 
 interface Choice {
   index: number
   delta: Delta
-  finish_reason: "stop" | null
+  finish_reason: "stop" | "tool_calls" | "length" | "content_filter" | null
   logprobs: null
 }
 
@@ -79,7 +115,7 @@ interface ChoiceNonStreaming {
   index: number
   message: Message
   logprobs: null
-  finish_reason: "stop"
+  finish_reason: "stop" | "tool_calls" | "length" | "content_filter"
 }
 
 // Payload types
@@ -93,11 +129,32 @@ export interface ChatCompletionsPayload {
   stop?: Array<string>
   n?: number
   stream?: boolean
+  tools?: Array<Tool>
+  tool_choice?: "none" | "auto" | ToolChoice
+}
+
+export interface Tool {
+  type: "function"
+  function: {
+    name: string
+    description?: string
+    parameters?: Record<string, unknown>
+  }
+}
+
+export interface ToolChoice {
+  type: "function"
+  function: {
+    name: string
+  }
 }
 
 export interface Message {
-  role: "user" | "assistant" | "system"
-  content: string | Array<ContentPart>
+  role: "user" | "assistant" | "system" | "tool"
+  content: string | Array<ContentPart> | null
+  tool_calls?: Array<ToolCall>
+  tool_call_id?: string
+  name?: string
 }
 
 // https://platform.openai.com/docs/api-reference
@@ -107,5 +164,15 @@ export interface ContentPart {
   text?: string
   image_url?: string
 }
+
+export interface ToolCall {
+  id: string
+  type: "function"
+  function: {
+    name: string
+    arguments: string
+  }
+}
+
 // https://platform.openai.com/docs/guides/images-vision#giving-a-model-images-as-input
 // Note: copilot use "image_url", but openai use "input_image"
