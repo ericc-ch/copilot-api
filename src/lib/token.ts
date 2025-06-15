@@ -1,5 +1,5 @@
-import consola from "consola"
 import fs from "node:fs/promises"
+import consola from "consola"
 
 import { PATHS } from "~/lib/paths"
 import { getCopilotToken } from "~/services/github/get-copilot-token"
@@ -22,7 +22,6 @@ export const setupCopilotToken = async () => {
   const refreshInterval = (refresh_in - 60) * 1000
 
   setInterval(async () => {
-    consola.start("Refreshing Copilot token")
     try {
       const { token } = await getCopilotToken()
       state.copilotToken = token
@@ -50,13 +49,10 @@ export async function setupGitHubToken(
       return
     }
 
-    consola.info("Not logged in, getting new access token")
+    consola.info("Getting new GitHub access token")
     const response = await getDeviceCode()
-    consola.debug("Device code response:", response)
 
-    consola.info(
-      `Please enter the code "${response.user_code}" in ${response.verification_uri}`,
-    )
+    consola.info(`Please enter the code "${response.user_code}" in ${response.verification_uri}`)
 
     const token = await pollAccessToken(response)
     await writeGithubToken(token)
