@@ -13,7 +13,11 @@ export const createEmbeddings = async (payload: EmbeddingRequest) => {
 
   if (!response.ok) throw new HTTPError("Failed to create embeddings", response)
 
-  return (await response.json()) as EmbeddingResponse
+  // return (await response.json()) as EmbeddingResponse
+
+  const json = await response.json()
+
+  return json as EmbeddingResponse
 }
 
 export interface EmbeddingRequest {

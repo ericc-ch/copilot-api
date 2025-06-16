@@ -1,19 +1,19 @@
 {
-  "name": "copilot-api",
-  "version": "0.3.1",
+  "name": "@nghyane/copilot-api",
+  "version": "1.0.1-beta.1",
   "description": "A wrapper around GitHub Copilot API to make it OpenAI compatible, making it usable for other tools.",
   "keywords": [
     "proxy",
     "github-copilot",
     "openai-compatible"
   ],
-  "homepage": "https://github.com/ericc-ch/copilot-api",
-  "bugs": "https://github.com/ericc-ch/copilot-api/issues",
+  "homepage": "https://github.com/nghyane/copilot-api",
+  "bugs": "https://github.com/nghyane/copilot-api/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ericc-ch/copilot-api.git"
+    "url": "git+https://github.com/nghyane/copilot-api.git"
   },
-  "author": "Erick Christian <erickchristian48@gmail.com>",
+  "author": "Nghyane <hoangvananhnghia@gmail.com>",
   "type": "module",
   "bin": {
     "copilot-api": "./dist/main.js"

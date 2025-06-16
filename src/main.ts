@@ -26,15 +26,12 @@ interface RunServerOptions {
 export async function runServer(options: RunServerOptions): Promise<void> {
   if (options.verbose) {
     consola.level = 5
-    consola.info("Verbose logging enabled")
   }
 
   if (options.business) {
     state.accountType = "business"
-    consola.info("Using business plan GitHub account")
   } else if (options.enterprise) {
     state.accountType = "enterprise"
-    consola.info("Using enterprise plan GitHub account")
   }
 
   state.manualApprove = options.manual
@@ -46,7 +43,6 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   if (options.githubToken) {
     state.githubToken = options.githubToken
-    consola.info("Using provided GitHub token")
   } else {
     await setupGitHubToken()
   }

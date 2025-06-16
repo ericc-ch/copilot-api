@@ -15,7 +15,6 @@ export async function pollAccessToken(
   // Interval is in seconds, we need to multiply by 1000 to get milliseconds
   // I'm also adding another second, just to be safe
   const sleepDuration = (deviceCode.interval + 1) * 1000
-  consola.debug(`Polling access token with interval of ${sleepDuration}ms`)
 
   while (true) {
     const response = await fetch(
@@ -39,7 +38,6 @@ export async function pollAccessToken(
     }
 
     const json = await response.json()
-    consola.debug("Polling access token response:", json)
 
     const { access_token } = json as AccessTokenResponse
 
