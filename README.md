@@ -9,6 +9,12 @@
 
 A reverse-engineered proxy for the GitHub Copilot API that exposes it as an OpenAI and Anthropic compatible service. This allows you to use GitHub Copilot with any tool that supports the OpenAI Chat Completions API or the Anthropic Messages API, including to power [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview).
 
+### New Features
+
+- **Copilot Usage Viewer**: Integrated web interface to view your GitHub Copilot usage statistics and quota information
+- **Token Display**: View the current Copilot token being used by the API
+- **Real-time Monitoring**: Track your usage and remaining quotas in real-time
+
 ## Demo
 
 https://github.com/user-attachments/assets/7654b383-669d-4eb9-b23c-06d7aefee8c5
@@ -113,6 +119,16 @@ These endpoints are designed to be compatible with the Anthropic Messages API.
 | `POST /v1/messages`              | `POST` | Creates a model response for a given conversation.           |
 | `POST /v1/messages/count_tokens` | `POST` | Calculates the number of tokens for a given set of messages. |
 
+### Usage Monitoring Endpoints
+
+New endpoints for monitoring your Copilot usage and quotas.
+
+| Endpoint                    | Method | Description                                               |
+| --------------------------- | ------ | --------------------------------------------------------- |
+| `GET /usage`               | `GET`  | Get detailed Copilot usage statistics and quota information. |
+| `GET /token`               | `GET`  | Get the current Copilot token being used by the API.     |
+| `GET /public/usage.html`   | `GET`  | Web interface for viewing usage statistics (accessible via browser). |
+
 ## Example Usage
 
 Using with npx:
@@ -148,6 +164,34 @@ npx copilot-api@latest auth
 # Run auth flow with verbose logging
 npx copilot-api@latest auth --verbose
 ```
+
+## Using the Usage Viewer
+
+After starting the server, you can access the Copilot Usage Viewer through your web browser:
+
+1. Start the server: `npx copilot-api@latest start`
+2. Open your browser and navigate to: `http://localhost:4141/public/usage.html`
+3. The page will automatically load your usage data when opened
+4. Use the controls to:
+   - **Fetch Usage**: Manually refresh usage data
+   - **Show Current Token**: View the current Copilot token
+   - **Enable Auto Refresh**: Automatically refresh data every 30 seconds
+
+### Auto Refresh Feature
+
+The usage viewer includes an automatic refresh feature that:
+- Updates usage data every 30 seconds when enabled
+- Shows a countdown timer to the next refresh
+- Displays the last update time
+- Can be toggled on/off at any time
+- Continues running in the background without interrupting your view
+
+The usage viewer provides:
+- Account information (plan type, access type, assigned date)
+- Quota information (remaining usage, total quota, overage count)
+- Real-time token display with automatic refresh
+- Support for Chinese and English interfaces
+- Auto-refresh functionality for continuous monitoring
 
 ## Using with Claude Code
 

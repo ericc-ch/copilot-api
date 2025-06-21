@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<!-- @ts-nocheck -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub Copilot Usage Viewer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f6f8fa;
+      color: #24292f;
+      line-height: 1.5;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .header h1 {
+      font-size: 28px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .control-section {
+      background: white;
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+
+    .btn {
+      background: #0969da;
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .btn:hover {
+      background: #0550ae;
+    }    .btn:disabled {
+      background: #8c959f;
+      cursor: not-allowed;
+    }
+
+    .btn.danger {
+      background: #cf222e;
+    }
+
+    .btn.danger:hover {
+      background: #a40e26;
+    }
+
+    .auto-refresh-status {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #656d76;
+      text-align: center;
+    }
+
+    .countdown {
+      font-weight: 500;
+      color: #0969da;
+    }
+
+    .result {
+      background: white;
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      overflow: hidden;
+      display: none;
+    }
+
+    .result-header {
+      background: #f6f8fa;
+      border-bottom: 1px solid #d0d7de;
+      padding: 16px 24px;
+      font-weight: 600;
+    }
+
+    .info-section {
+      padding: 24px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid #f6f8fa;
+    }
+
+    .info-row:last-child {
+      border-bottom: none;
+    }
+
+    .info-label {
+      color: #656d76;
+      font-size: 14px;
+    }
+
+    .info-value {
+      font-weight: 500;
+      font-size: 14px;
+    }
+
+    .quota-section {
+      border-top: 1px solid #d0d7de;
+      background: #f6f8fa;
+      padding: 24px;
+    }
+
+    .quota-title {
+      font-weight: 600;
+      margin-bottom: 16px;
+      font-size: 16px;
+    }
+
+    .quota-item {
+      background: white;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .quota-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .quota-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .quota-name {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .quota-badge {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 4px 8px;
+      border-radius: 12px;
+    }
+
+    .unlimited {
+      background: #dafbe1;
+      color: #116329;
+    }
+
+    .limited {
+      background: #fff8c5;
+      color: #7d4e00;
+    }
+
+    .quota-progress {
+      height: 6px;
+      background: #eaeef2;
+      border-radius: 3px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: #1f883d;
+      transition: width 0.3s ease;
+    }
+
+    .quota-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .stat {
+      text-align: center;
+      padding: 8px;
+      background: #f6f8fa;
+      border-radius: 4px;
+    }
+
+    .stat-value {
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #656d76;
+      margin-top: 2px;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px 24px;
+      color: #656d76;
+    }
+
+    .spinner {
+      border: 2px solid #f6f8fa;
+      border-top: 2px solid #0969da;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 12px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .error {
+      background: #ffebe9;
+      color: #cf222e;
+      padding: 16px 24px;
+      border-left: 3px solid #cf222e;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 40px;
+      padding: 20px;
+      color: #656d76;
+      font-size: 14px;
+    }
+
+    .footer a {
+      color: #0969da;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    .token-display {
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 16px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 12px;
+      word-break: break-all;
+    }
+
+    .token-label {
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #24292f;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 id="title">GitHub Copilot Usage Viewer</h1>
+    </div>    <div class="control-section">
+      <button id="fetchBtn" class="btn" onclick="fetchUsage()">Fetch Usage</button>
+      <button id="tokenBtn" class="btn" onclick="fetchToken()" style="margin-left: 10px;">Show Current Token</button>
+      <button id="autoBtn" class="btn" onclick="toggleAutoRefresh()" style="margin-left: 10px;">Enable Auto Refresh</button>
+      <div style="margin-top: 10px; font-size: 12px; color: #656d76;">
+        <span id="autoStatus">Auto Refresh: Off</span>
+        <span id="countdown" style="margin-left: 15px;"></span>
+      </div>
+    </div>    <div id="tokenResult" class="result" style="display: none;">
+      <div class="result-header">
+        Current Copilot Token Information
+      </div>
+      <div class="info-section">
+        <div class="token-label">Token:</div>
+        <div class="token-display" id="tokenDisplay"></div>
+        <small style="color: #656d76;">Note: This token is automatically refreshed periodically</small>
+      </div>
+    </div>
+
+    <div id="result" class="result"></div>    <div class="footer">
+      <a href="https://github.com/uheej0625/copilot-usage-viewer" target="_blank">
+        Based on copilot-usage-viewer project
+      </a>
+    </div>
+  </div>
+  <script>
+    // @ts-nocheck
+    // Language detection and translations
+    const lang = 'en'; // Default to English
+
+    const translations = {
+      en: {
+        title: 'GitHub Copilot Usage Viewer',
+        fetchBtn: 'Fetch Usage',
+        loading: 'Loading data...',
+        error: 'An error occurred',
+        accountInfo: 'Account Information',
+        quotaInfo: 'Quota Information',
+        plan: 'Plan',
+        accessType: 'Access Type',
+        assignedDate: 'Assigned Date',
+        chatEnabled: 'Chat Enabled',
+        quotaResetDate: 'Quota Reset Date',
+        canSignupLimited: 'Can Signup for Limited',
+        orgCount: 'Organization Count',
+        unlimited: 'Unlimited',
+        limited: 'Limited',
+        remaining: 'Remaining',
+        totalQuota: 'Total Quota',
+        overageCount: 'Overage Count',
+        remainingPercent: 'Remaining %',
+        yes: 'Yes',
+        no: 'No',
+        premiumInteractions: 'Premium Interactions',
+        chat: 'Chat',
+        completions: 'Completions',
+        currentToken: 'Current Copilot Token'
+      },
+      zh: {
+        title: 'GitHub Copilot Usage Viewer',
+        fetchBtn: 'Fetch Usage',
+        loading: 'Loading data...',
+        error: 'An error occurred',
+        accountInfo: 'Account Information',
+        quotaInfo: 'Quota Information',
+        plan: 'Plan',
+        accessType: 'Access Type',
+        assignedDate: 'Assigned Date',
+        chatEnabled: 'Chat Enabled',
+        quotaResetDate: 'Quota Reset Date',
+        canSignupLimited: 'Can Signup for Limited',
+        orgCount: 'Organization Count',
+        unlimited: 'Unlimited',
+        limited: 'Limited',
+        remaining: 'Remaining',
+        totalQuota: 'Total Quota',
+        overageCount: 'Overage Count',
+        remainingPercent: 'Remaining %',
+        yes: 'Yes',
+        no: 'No',
+        premiumInteractions: 'Premium Interactions',
+        chat: 'Chat',
+        completions: 'Completions',
+        currentToken: 'Current Copilot Token'
+      }
+    };
+
+    const t = translations[lang];    // Initialize UI text
+    document.getElementById('title').textContent = t.title;
+    document.getElementById('fetchBtn').textContent = t.fetchBtn;
+
+    // Auto refresh variables
+    let autoRefreshInterval = null;
+    let countdownInterval = null;    let isAutoRefreshEnabled = false;
+    let nextRefreshTime = 0;
+    const REFRESH_INTERVAL = 30000; // 30 seconds
+      function updateAutoRefreshUI() {
+      const autoBtn = document.getElementById('autoBtn');
+      const autoStatus = document.getElementById('autoStatus');
+      
+      if (isAutoRefreshEnabled) {
+        autoBtn.textContent = 'Disable Auto Refresh';
+        autoBtn.className = 'btn danger';
+        autoStatus.textContent = 'Auto Refresh: On (30s interval)';
+      } else {
+        autoBtn.textContent = 'Enable Auto Refresh';
+        autoBtn.className = 'btn';
+        autoStatus.textContent = 'Auto Refresh: Off';
+      }
+    }    function updateCountdown() {
+      const countdown = document.getElementById('countdown');
+      if (!isAutoRefreshEnabled) {
+        countdown.textContent = '';
+        return;
+      }
+      
+      const remaining = Math.max(0, Math.ceil((nextRefreshTime - Date.now()) / 1000));
+      if (remaining > 0) {
+        countdown.textContent = `Next refresh: ${remaining}s`;
+      } else {
+        countdown.textContent = 'Refreshing...';
+      }
+    }
+
+    function startAutoRefresh() {
+      if (autoRefreshInterval) return;
+      
+      isAutoRefreshEnabled = true;
+      nextRefreshTime = Date.now() + REFRESH_INTERVAL;
+        // Start the refresh interval
+      autoRefreshInterval = setInterval(() => {
+        fetchUsage(true); // Pass true to indicate this is an auto refresh
+        nextRefreshTime = Date.now() + REFRESH_INTERVAL;
+      }, REFRESH_INTERVAL);
+      
+      // Start the countdown interval
+      countdownInterval = setInterval(updateCountdown, 1000);
+      
+      updateAutoRefreshUI();
+      updateCountdown();
+        // Fetch immediately when starting auto refresh
+      fetchUsage(false); // First call is manual, so show loading
+    }
+
+    function stopAutoRefresh() {
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+      }
+      
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+      }
+      
+      isAutoRefreshEnabled = false;
+      updateAutoRefreshUI();
+      updateCountdown();
+    }
+
+    function toggleAutoRefresh() {
+      if (isAutoRefreshEnabled) {
+        stopAutoRefresh();
+      } else {
+        startAutoRefresh();
+      }
+    }    // Initialize auto refresh UI
+    updateAutoRefreshUI();
+
+    // Auto-fetch data on page load
+    window.addEventListener('DOMContentLoaded', function() {
+      // Wait a moment for the server to be ready, then fetch initial data
+      setTimeout(() => {
+        fetchUsage(false);
+      }, 1000);
+    });
+
+    function getQuotaName(key) {
+      const names = {
+        'premium_interactions': t.premiumInteractions,
+        'chat': t.chat,
+        'completions': t.completions
+      };
+      return names[key] || key.replace('_', ' ');
+    }
+
+    function formatDate(dateString) {
+      if (!dateString) return 'N/A';
+      const date = new Date(dateString);
+      return lang === 'zh' ? date.toLocaleDateString('zh-CN') : date.toLocaleDateString('en-US');
+    }    async function fetchToken() {
+      const tokenResult = document.getElementById('tokenResult');
+      const tokenDisplay = document.getElementById('tokenDisplay');
+      
+      try {
+        const response = await fetch('/token');
+        
+        if (response.ok) {
+          const data = await response.json();
+          tokenDisplay.textContent = data.token || 'Unable to get token';
+          tokenResult.style.display = 'block';
+        } else {
+          tokenDisplay.textContent = 'Failed to get token';
+          tokenResult.style.display = 'block';
+        }
+      } catch (error) {
+        tokenDisplay.textContent = `Error: ${error.message}`;
+        tokenResult.style.display = 'block';
+      }
+    }async function fetchUsage(isAutoRefresh = false) {
+      const resultDiv = document.getElementById('result');
+      const fetchBtn = document.getElementById('fetchBtn');
+
+      // Only show loading state if not auto refresh
+      if (!isAutoRefresh) {
+        fetchBtn.disabled = true;
+        fetchBtn.textContent = t.loading;
+        resultDiv.innerHTML = `
+          <div class="loading">
+            <div class="spinner"></div>
+            <div>${t.loading}</div>
+          </div>
+        `;
+        resultDiv.style.display = 'block';
+      }
+
+      try {
+        const response = await fetch('/usage');
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        displayResult(data, isAutoRefresh);
+      } catch (error) {
+        let errorMessage = `${t.error}: ${error.message}`;
+        resultDiv.innerHTML = `<div class="error">${errorMessage}</div>`;
+        resultDiv.style.display = 'block';
+      } finally {
+        if (!isAutoRefresh) {
+          fetchBtn.disabled = false;
+          fetchBtn.textContent = t.fetchBtn;
+        }
+      }
+    }    function displayResult(data, isAutoRefresh = false) {
+      const resultDiv = document.getElementById('result');
+      
+      // Get current time for last updated display
+      const now = new Date();
+      const timeString = now.toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US');
+      
+      // Sort quotas to show premium_interactions first
+      const quotas = Object.entries(data.quota_snapshots || {})
+        .sort(([a], [b]) => a === 'premium_interactions' ? -1 : b === 'premium_interactions' ? 1 : 0);
+
+      const quotaCards = quotas.map(([key, quota]) => {
+        const isUnlimited = quota.unlimited;
+        const progressPercent = isUnlimited ? 100 : quota.percent_remaining;
+        
+        return `
+          <div class="quota-item">
+            <div class="quota-header">
+              <div class="quota-name">${getQuotaName(key)}</div>
+              <div class="quota-badge ${isUnlimited ? 'unlimited' : 'limited'}">
+                ${isUnlimited ? t.unlimited : t.limited}
+              </div>
+            </div>
+            
+            ${!isUnlimited ? `
+              <div class="quota-progress">
+                <div class="progress-fill" style="width: ${progressPercent}%"></div>
+              </div>
+            ` : ''}
+            
+            <div class="quota-stats">
+              <div class="stat">
+                <div class="stat-value">${isUnlimited ? '∞' : quota.remaining}</div>
+                <div class="stat-label">${t.remaining}</div>
+              </div>
+              <div class="stat">
+                <div class="stat-value">${isUnlimited ? '∞' : quota.entitlement}</div>
+                <div class="stat-label">${t.totalQuota}</div>
+              </div>
+              ${!isUnlimited ? `
+                <div class="stat">
+                  <div class="stat-value">${quota.overage_count}</div>
+                  <div class="stat-label">${t.overageCount}</div>
+                </div>
+                <div class="stat">
+                  <div class="stat-value">${progressPercent.toFixed(1)}%</div>
+                  <div class="stat-label">${t.remainingPercent}</div>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');      resultDiv.innerHTML = `
+        <div class="result-header">
+          ${t.accountInfo}
+          <div style="float: right; font-size: 12px; font-weight: normal; color: #656d76;">
+            Last Updated: ${timeString}
+          </div>
+        </div>
+        <div class="info-section">
+          <div class="info-row">
+            <span class="info-label">${t.plan}</span>
+            <span class="info-value">${data.copilot_plan || 'N/A'}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">${t.accessType}</span>
+            <span class="info-value">${data.access_type_sku || 'N/A'}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">${t.assignedDate}</span>
+            <span class="info-value">${formatDate(data.assigned_date)}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">${t.chatEnabled}</span>
+            <span class="info-value">${data.chat_enabled ? t.yes : t.no}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">${t.quotaResetDate}</span>
+            <span class="info-value">${data.quota_reset_date || 'N/A'}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">${t.canSignupLimited}</span>
+            <span class="info-value">${data.can_signup_for_limited ? t.yes : t.no}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">${t.orgCount}</span>
+            <span class="info-value">${(data.organization_list || []).length}</span>
+          </div>
+        </div>
+        
+        <div class="quota-section">
+          <div class="quota-title">${t.quotaInfo}</div>
+          ${quotaCards}
+        </div>
+      `;
+      
+      resultDiv.style.display = 'block';
+    }
+  </script>
+</body>
+</html>

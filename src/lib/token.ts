@@ -19,13 +19,19 @@ export const setupCopilotToken = async () => {
   const { token, refresh_in } = await getCopilotToken()
   state.copilotToken = token
 
-  const refreshInterval = (refresh_in - 60) * 1000
+  // Display the Copilot token to the screen
+  consola.success("GitHub Copilot Token fetched successfully!")
+  consola.info(`Token: ${token}`)
+  consola.info(`Token validity: ${Math.floor(refresh_in / 60)} minutes`)
 
+  const refreshInterval = (refresh_in - 60) * 1000
   setInterval(async () => {
     consola.start("Refreshing Copilot token")
     try {
       const { token } = await getCopilotToken()
       state.copilotToken = token
+      consola.success("Copilot token refreshed")
+      consola.info(`New Token: ${token}`)
     } catch (error) {
       consola.error("Failed to refresh Copilot token:", error)
       throw error
