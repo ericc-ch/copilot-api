@@ -12,6 +12,8 @@ import {
   createChatCompletions,
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
+  type ToolCall,
+  type Tool,
 } from "~/services/copilot/create-chat-completions"
 import { HTTPError } from "~/lib/http-error"
 
@@ -45,17 +47,41 @@ export async function handleCompletion(c: Context) {
         // Step 3: Trim Whitespace
         .trim()
 
-      // Return the message with sanitized content
-      return { role: msg.role, content: cleaned }
+      // Step 3: Handle Tool Calls
+      // Preserve tool calls and ensure they have proper IDs
+      const sanitizedMsg: any = { 
+        role: msg.role, 
+        content: cleaned || null  // Convert empty strings to null for consistency
+      }
+      
+      if (msg.tool_calls) {
+        sanitizedMsg.tool_calls = msg.tool_calls.map((toolCall, index) => ({
+          ...toolCall,
+          // Ensure each tool call has an ID - generate one if missing
+          id: toolCall.id || `call_${Date.now()}_${index}`
+        }))
+      }
+      
+      if (msg.tool_call_id) {
+        sanitizedMsg.tool_call_id = msg.tool_call_id
+      }
+
+      return sanitizedMsg
     })
     // Step 4: Filter Empty Messages
     // Remove messages that might have become empty after sanitization.
     .filter((msg) => {
-      if (!msg.content) {
+      // Don't drop messages that have tool calls or tool call IDs, even if content is empty
+      if (!msg.content && !msg.tool_calls && !msg.tool_call_id) {
         consola.warn('Dropping empty message after sanitization')
         return false
       }
-      return true
+      // Always keep messages with tool-related information
+      if (msg.tool_calls || msg.tool_call_id || msg.role === 'tool') {
+        return true
+      }
+      // For regular messages, ensure they have content
+      return Boolean(msg.content && msg.content.trim())
     })
   // --- End Sanitization Block ---
 
@@ -74,10 +100,18 @@ export async function handleCompletion(c: Context) {
     }
   }
 
+  // Preserve tool-related parameters if present
+  const finalPayload: ChatCompletionsPayload = {
+    ...payload,
+    // Explicitly preserve tools and tool_choice to ensure they're not lost
+    ...(payload.tools && { tools: payload.tools }),
+    ...(payload.tool_choice && { tool_choice: payload.tool_choice }),
+  }
+
   // Call Copilot API and handle HTTP errors with detailed logging
   let response: Awaited<ReturnType<typeof createChatCompletions>>
   try {
-    response = await createChatCompletions(payload)
+    response = await createChatCompletions(finalPayload)
   } catch (err: unknown) {
     if (err instanceof HTTPError) {
       const body = await err.response.text()

@@ -15,15 +15,17 @@ import type { Message } from "~/services/copilot/create-chat-completions"
  */
 const sanitizeMessages = (messages: Array<Message>): Array<Message> => {
   return messages.map((msg, index) => {
-    if (typeof msg.content !== "string") {
-      // Log a warning if content isn't a string, as this might indicate
+    if (typeof msg.content !== "string" && msg.content !== null) {
+      // Log a warning if content isn't a string or null, as this might indicate
       // an issue upstream if it happens often.
       consola.warn(
-        `Message at index ${index} had non-string content during tokenization:`, msg.content)
+        `Message at index ${index} had non-string/null content during tokenization:`, msg.content)
       // Convert non-string content to an empty string to prevent errors in encodeChat.
-      return { ...msg, content: String(msg.content ?? "") }
+      return { role: msg.role, content: String(msg.content ?? "") }
     }
-    return msg // Return unchanged if content is already a string.
+    // For tokenization purposes, we only need role and content - tool calls are ignored
+    // since encodeChat doesn't handle them directly. Convert null to empty string for encodeChat.
+    return { role: msg.role, content: msg.content || "" }
   })
 }
 

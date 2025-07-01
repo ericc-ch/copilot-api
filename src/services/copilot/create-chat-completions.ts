@@ -41,12 +41,13 @@ export interface ChatCompletionChunk {
 interface Delta {
   content?: string
   role?: string
+  tool_calls?: ToolCall[]
 }
 
 interface Choice {
   index: number
   delta: Delta
-  finish_reason: "stop" | null
+  finish_reason: "stop" | "tool_calls" | null
   logprobs: null
 }
 
@@ -64,7 +65,7 @@ interface ChoiceNonStreaming {
   index: number
   message: Message
   logprobs: null
-  finish_reason: "stop"
+  finish_reason: "stop" | "tool_calls"
 }
 
 // Payload types
@@ -78,11 +79,33 @@ export interface ChatCompletionsPayload {
   stop?: Array<string>
   n?: number
   stream?: boolean
+  tools?: Tool[]
+  tool_choice?: string | { type: string; function?: { name: string } }
+}
+
+export interface Tool {
+  type: "function"
+  function: {
+    name: string
+    description?: string
+    parameters?: object
+  }
 }
 
 export interface Message {
-  role: "user" | "assistant" | "system"
-  content: string
+  role: "user" | "assistant" | "system" | "tool"
+  content: string | null
+  tool_calls?: ToolCall[]
+  tool_call_id?: string
+}
+
+export interface ToolCall {
+  id: string
+  type: "function"
+  function: {
+    name: string
+    arguments: string
+  }
 }
 
 // https://platform.openai.com/docs/api-reference
