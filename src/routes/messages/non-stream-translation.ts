@@ -76,39 +76,49 @@ function handleSystemPrompt(
 }
 
 function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
-  const newMessages: Array<Message> = []
+  const msgs: Array<Message> = []
 
   if (Array.isArray(message.content)) {
     const toolResultBlocks = message.content.filter(
       (block): block is AnthropicToolResultBlock =>
         block.type === "tool_result",
     )
+    const textBlocks = message.content.filter((block) => block.type === "text")
     const otherBlocks = message.content.filter(
-      (block) => block.type !== "tool_result",
+      (block) => block.type !== "tool_result" && block.type !== "text",
     )
-
-    if (otherBlocks.length > 0) {
-      newMessages.push({
-        role: "user",
-        content: mapContent(otherBlocks),
-      })
-    }
-
+    // OpenAI order: tool results FIRST, then user text (if any)
     for (const block of toolResultBlocks) {
-      newMessages.push({
+      msgs.push({
         role: "tool",
         tool_call_id: block.tool_use_id,
-        content: block.content,
+        content:
+          typeof block.content === "string" ?
+            block.content
+          : JSON.stringify(block.content),
       })
     }
+    if (textBlocks.length > 0 || otherBlocks.length > 0) {
+      const textContent = [
+        ...textBlocks.map((b) => b.text),
+        ...otherBlocks.map((b) => JSON.stringify(b)), // fallback for custom blocks
+      ]
+        .join("\n\n")
+        .trim()
+      if (textContent.length > 0) {
+        msgs.push({
+          role: "user",
+          content: textContent,
+        })
+      }
+    }
   } else {
-    newMessages.push({
+    msgs.push({
       role: "user",
       content: mapContent(message.content),
     })
   }
-
-  return newMessages
+  return msgs
 }
 
 function handleAssistantMessage(
