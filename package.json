@@ -23,7 +23,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "dev": "bun run --watch ./src/main.ts",
+    "dev": "bun run --watch ./src/main.ts start",
     "knip": "knip-bun",
     "lint": "eslint .",
     "prepack": "bun run build",

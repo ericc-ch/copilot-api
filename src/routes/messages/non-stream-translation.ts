@@ -83,6 +83,15 @@ function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
       (block): block is AnthropicToolResultBlock =>
         block.type === "tool_result",
     )
+
+    for (const block of toolResultBlocks) {
+      newMessages.push({
+        role: "tool",
+        tool_call_id: block.tool_use_id,
+        content: mapContent(block.content),
+      })
+    }
+
     const otherBlocks = message.content.filter(
       (block) => block.type !== "tool_result",
     )
@@ -91,14 +100,6 @@ function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
       newMessages.push({
         role: "user",
         content: mapContent(otherBlocks),
-      })
-    }
-
-    for (const block of toolResultBlocks) {
-      newMessages.push({
-        role: "tool",
-        tool_call_id: block.tool_use_id,
-        content: block.content,
       })
     }
   } else {
