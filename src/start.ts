@@ -105,6 +105,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   )
 
   serve({
+    hostname: "0.0.0.0",
     fetch: server.fetch as ServerHandler,
     port: options.port,
   })
