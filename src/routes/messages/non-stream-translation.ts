@@ -198,7 +198,7 @@ function translateAnthropicToolsToOpenAI(
     return undefined
   }
   return anthropicTools
-    .filter((tool) => tool.name.length <= 64 && model.startsWith("gpt-")) // OpenAI limits function names to 64 chars
+    .filter((tool) => tool.name.length <= 64 || !model.startsWith("gpt-")) // OpenAI limits function names to 64 chars
     .map((tool) => ({
       type: "function",
       function: {
