@@ -16,8 +16,22 @@ export async function forwardError(c: Context, error: unknown) {
   consola.error("Error occurred:", error)
 
   if (error instanceof HTTPError) {
-    consola.error("HTTP error:", await error.response.json())
-    const errorText = await error.response.text()
+    const cloned = error.response.clone()
+    let errorText = ""
+    let errorJson = null
+    try {
+      errorJson = await cloned.json()
+      consola.error("HTTP error:", errorJson)
+      errorText = typeof errorJson === 'string' ? errorJson : JSON.stringify(errorJson)
+    } catch {
+      try {
+        errorText = await cloned.text()
+        consola.error("HTTP error text:", errorText)
+      } catch {
+        errorText = "Failed to read error response"
+        consola.error("Failed to read error response body")
+      }
+    }
     return c.json(
       {
         error: {

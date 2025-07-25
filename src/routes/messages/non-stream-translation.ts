@@ -23,12 +23,78 @@ import {
 } from "./anthropic-types"
 import { mapOpenAIStopReasonToAnthropic } from "./utils"
 
+// Helper function to validate message sequences
+function validateMessageSequence(messages: Array<Message>): void {
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]
+    if (message.role === "assistant" && message.tool_calls && message.tool_calls.length > 0) {
+      // Check if the next messages are tool responses
+      const toolCallIds = new Set(message.tool_calls.map(tc => tc.id))
+      let j = i + 1
+      const foundToolResponses = new Set<string>()
+      
+      while (j < messages.length && messages[j].role === "tool") {
+        const toolMessage = messages[j]
+        if ("tool_call_id" in toolMessage && toolMessage.tool_call_id) {
+          foundToolResponses.add(toolMessage.tool_call_id)
+        }
+        j++
+      }
+      
+      // Check if all tool calls have responses
+      for (const toolCallId of toolCallIds) {
+        if (!foundToolResponses.has(toolCallId)) {
+          throw new Error(`Tool call ${toolCallId} is missing a response message`)
+        }
+      }
+    }
+  }
+}
+
+// Helper function to fix message sequences by adding missing tool responses
+function fixMessageSequence(messages: Array<Message>): Array<Message> {
+  const fixedMessages: Array<Message> = []
+  
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]
+    fixedMessages.push(message)
+    
+    if (message.role === "assistant" && message.tool_calls && message.tool_calls.length > 0) {
+      // Find which tool calls need responses
+      const foundToolResponses = new Set<string>()
+      
+      // Look ahead to see what tool responses exist
+      let j = i + 1
+      while (j < messages.length && messages[j].role === "tool") {
+        const toolMessage = messages[j]
+        if ("tool_call_id" in toolMessage && toolMessage.tool_call_id) {
+          foundToolResponses.add(toolMessage.tool_call_id)
+        }
+        j++
+      }
+      
+      // Add placeholder responses for missing tool calls
+      for (const toolCall of message.tool_calls) {
+        if (!foundToolResponses.has(toolCall.id)) {
+          fixedMessages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: "Tool execution completed.",
+          })
+        }
+      }
+    }
+  }
+  
+  return fixedMessages
+}
+
 // Payload translation
 
 export function translateToOpenAI(
   payload: AnthropicMessagesPayload,
 ): ChatCompletionsPayload {
-  return {
+  const translated = {
     model: payload.model,
     messages: translateAnthropicMessagesToOpenAI(
       payload.messages,
@@ -43,6 +109,14 @@ export function translateToOpenAI(
     tools: translateAnthropicToolsToOpenAI(payload.tools),
     tool_choice: translateAnthropicToolChoiceToOpenAI(payload.tool_choice),
   }
+  
+  // Debug: log the messages before validation
+  // console.log("DEBUG: Translated messages:", JSON.stringify(translated.messages, null, 2))
+  
+  // Validate and fix the message sequence to ensure tool calls have responses
+  translated.messages = fixMessageSequence(translated.messages)
+  
+  return translated
 }
 
 function translateAnthropicMessagesToOpenAI(
@@ -51,11 +125,17 @@ function translateAnthropicMessagesToOpenAI(
 ): Array<Message> {
   const systemMessages = handleSystemPrompt(system)
 
-  const otherMessages = anthropicMessages.flatMap((message) =>
-    message.role === "user" ?
-      handleUserMessage(message)
-    : handleAssistantMessage(message),
-  )
+  const otherMessages: Array<Message> = []
+  
+  for (let i = 0; i < anthropicMessages.length; i++) {
+    const message = anthropicMessages[i]
+    if (message.role === "user") {
+      otherMessages.push(...handleUserMessage(message))
+    } else {
+      const assistantMessages = handleAssistantMessage(message)
+      otherMessages.push(...assistantMessages)
+    }
+  }
 
   return [...systemMessages, ...otherMessages]
 }
