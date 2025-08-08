@@ -281,9 +281,26 @@ function translateAnthropicToolChoiceToOpenAI(
 export function translateToAnthropic(
   response: ChatCompletionResponse,
 ): AnthropicResponse {
-  const choice = response.choices[0]
-  const textBlocks = getAnthropicTextBlocks(choice.message.content)
-  const toolUseBlocks = getAnthropicToolUseBlocks(choice.message.tool_calls)
+  // Merge content from all choices
+  let allTextBlocks: Array<AnthropicTextBlock> = []
+  let allToolUseBlocks: Array<AnthropicToolUseBlock> = []
+  let stopReason: "stop" | "length" | "tool_calls" | "content_filter" | null = null // default
+  stopReason = response.choices[0]?.finish_reason ?? stopReason;
+  
+  // Process all choices to extract text and tool use blocks
+  for (const choice of response.choices) {
+    const textBlocks = getAnthropicTextBlocks(choice.message.content)
+    const toolUseBlocks = getAnthropicToolUseBlocks(choice.message.tool_calls)
+    
+    allTextBlocks.push(...textBlocks)
+    allToolUseBlocks.push(...toolUseBlocks)
+    
+    // Use the finish_reason from the first choice, or prioritize tool_calls
+    if (choice.finish_reason === "tool_calls" || (stopReason === "stop" && choice.finish_reason !== null)) {
+      stopReason = choice.finish_reason
+    }
+  }
+
   // Note: GitHub Copilot doesn't generate thinking blocks, so we don't include them in responses
 
   return {
@@ -291,8 +308,8 @@ export function translateToAnthropic(
     type: "message",
     role: "assistant",
     model: response.model,
-    content: [...textBlocks, ...toolUseBlocks],
-    stop_reason: mapOpenAIStopReasonToAnthropic(choice.finish_reason),
+    content: [...allTextBlocks, ...allToolUseBlocks],
+    stop_reason: mapOpenAIStopReasonToAnthropic(stopReason),
     stop_sequence: null,
     usage: {
       input_tokens: response.usage?.prompt_tokens ?? 0,
