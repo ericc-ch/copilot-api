@@ -31,7 +31,10 @@ export const createChatCompletions = async (
     consola.debug(
       `Compatible mode headers: X-Initiator=${sessionHeaders["X-Initiator"]}`,
     )
-  }
+  // Optional: Add debug logging for all modes
+  consola.debug(
+    `Headers (${state.headerMode} mode): X-Initiator=${sessionHeaders["X-Initiator"]}`,
+  )
 
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
     method: "POST",
