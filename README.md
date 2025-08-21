@@ -151,17 +151,18 @@ Copilot API now uses a subcommand structure with these main commands:
 
 The following command line options are available for the `start` command:
 
-| Option         | Description                                                                   | Default    | Alias |
-| -------------- | ----------------------------------------------------------------------------- | ---------- | ----- |
-| --port         | Port to listen on                                                             | 4141       | -p    |
-| --verbose      | Enable verbose logging                                                        | false      | -v    |
-| --account-type | Account type to use (individual, business, enterprise)                        | individual | -a    |
-| --manual       | Enable manual request approval                                                | false      | none  |
-| --rate-limit   | Rate limit in seconds between requests                                        | none       | -r    |
-| --wait         | Wait instead of error when rate limit is hit                                  | false      | -w    |
-| --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand) | none       | -g    |
-| --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
-| --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
+| Option         | Description                                                                      | Default    | Alias |
+| -------------- | -------------------------------------------------------------------------------- | ---------- | ----- |
+| --port         | Port to listen on                                                                | 4141       | -p    |
+| --verbose      | Enable verbose logging                                                           | false      | -v    |
+| --account-type | Account type to use (individual, business, enterprise)                           | individual | -a    |
+| --manual       | Enable manual request approval                                                   | false      | none  |
+| --rate-limit   | Rate limit in seconds between requests                                           | none       | -r    |
+| --wait         | Wait instead of error when rate limit is hit                                     | false      | -w    |
+| --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand)    | none       | -g    |
+| --claude-code  | Generate a command to launch Claude Code with Copilot API config                 | false      | -c    |
+| --show-token   | Show GitHub and Copilot tokens on fetch and refresh                              | false      | none  |
+| --header-mode  | Header mode: savings (cost-optimized) or compatible (VS Code extension behavior) | savings    | none  |
 
 ### Auth Command Options
 
@@ -336,3 +337,34 @@ bun run start
   - `--rate-limit <seconds>`: Enforces a minimum time interval between requests. For example, `copilot-api start --rate-limit 30` will ensure there's at least a 30-second gap between requests.
   - `--wait`: Use this with `--rate-limit`. It makes the server wait for the cooldown period to end instead of rejecting the request with an error. This is useful for clients that don't automatically retry on rate limit errors.
 - If you have a GitHub business or enterprise plan account with Copilot, use the `--account-type` flag (e.g., `--account-type business`). See the [official documentation](https://docs.github.com/en/enterprise-cloud@latest/copilot/managing-copilot/managing-github-copilot-in-your-organization/managing-access-to-github-copilot-in-your-organization/managing-github-copilot-access-to-your-organizations-network#configuring-copilot-subscription-based-network-routing-for-your-enterprise-or-organization) for more details.
+
+## Request Header Modes
+
+Copilot API supports two header modes to balance cost optimization with compatibility:
+
+### `savings` Mode (Default)
+
+Maximum cost optimization using current behavior:
+
+- **Headers**: Only `X-Initiator`
+- **Logic**: Set to `agent` when assistant/tool messages present, otherwise `user`
+- **Use case**: Cost-sensitive applications, development, testing
+
+```bash
+copilot-api start
+# or explicitly
+copilot-api start --header-mode savings
+```
+
+### `compatible` Mode
+
+VS Code Copilot extension compatibility:
+
+- **Headers**: Both `X-Initiator` and `X-Interaction-Id`
+- **Logic**: Replicates VS Code extension's behavior(sort of)
+- **Session Management**: UUID-based session tracking
+- **Use case**: Use this when you want to mimic the behavior of the VS Code extension to avoid potential abuse detection. (I am not sure if they do that, but it's better to be cautious.)
+
+```bash
+copilot-api start --header-mode compatible
+```

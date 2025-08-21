@@ -15,6 +15,9 @@ export interface State {
   // Rate limiting configuration
   rateLimitSeconds?: number
   lastRequestTimestamp?: number
+
+  // Header mode configuration
+  headerMode: "savings" | "compatible"
 }
 
 export const state: State = {
@@ -22,4 +25,5 @@ export const state: State = {
   manualApprove: false,
   rateLimitWait: false,
   showToken: false,
+  headerMode: "savings",
 }

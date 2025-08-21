@@ -23,6 +23,7 @@ interface RunServerOptions {
   githubToken?: string
   claudeCode: boolean
   showToken: boolean
+  headerMode: string
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -41,10 +42,20 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.rateLimitWait = options.rateLimitWait
   state.showToken = options.showToken
 
+  // Set header mode
+  state.headerMode = options.headerMode as "savings" | "compatible"
+
+  if (state.headerMode === "compatible") {
+    consola.info("Using compatible mode - full VS Code extension compatibility")
+  } else {
+    consola.info("Using savings mode - optimized for premium requests savings")
+  }
+
   await ensurePaths()
   await cacheVSCodeVersion()
 
   if (options.githubToken) {
+    // eslint-disable-next-line require-atomic-updates
     state.githubToken = options.githubToken
     consola.info("Using provided GitHub token")
   } else {
@@ -169,6 +180,12 @@ export const start = defineCommand({
       default: false,
       description: "Show GitHub and Copilot tokens on fetch and refresh",
     },
+    "header-mode": {
+      type: "string",
+      default: "savings",
+      description:
+        "Header mode: savings (default, cost-optimized) or compatible (VS Code Copilot extension behavior)",
+    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
@@ -186,6 +203,7 @@ export const start = defineCommand({
       githubToken: args["github-token"],
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
+      headerMode: args["header-mode"],
     })
   },
 })
