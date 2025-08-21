@@ -46,7 +46,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.headerMode = options.headerMode as "savings" | "compatible"
 
   if (state.headerMode === "compatible") {
-    consola.info("Using compatible mode - full VS Code extension compatibility")
+    consola.info("Using compatible mode - VS Code extension compatibility")
   } else {
     consola.info("Using savings mode - optimized for premium requests savings")
   }

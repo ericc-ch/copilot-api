@@ -360,9 +360,8 @@ copilot-api start --header-mode savings
 
 VS Code Copilot extension compatibility:
 
-- **Headers**: Both `X-Initiator` and `X-Interaction-Id`
-- **Logic**: Replicates VS Code extension's behavior(sort of)
-- **Session Management**: UUID-based session tracking
+- **Headers**: `X-Initiator`
+- **Logic**: If last message is user then it is user, otherwise agent
 - **Use case**: Use this when you want to mimic the behavior of the VS Code extension to avoid potential abuse detection. (I am not sure if they do that, but it's better to be cautious.)
 
 ```bash

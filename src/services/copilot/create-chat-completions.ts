@@ -23,13 +23,13 @@ export const createChatCompletions = async (
   // Build headers
   const headers: Record<string, string> = {
     ...copilotHeaders(state, enableVision),
-    ...sessionHeaders, // This includes X-Initiator and optionally X-Interaction-Id
+    ...sessionHeaders, // This includes X-Initiator
   }
 
   // Optional: Add debug logging
   if (state.headerMode === "compatible") {
     consola.debug(
-      `Compatible mode headers: X-Initiator=${sessionHeaders["X-Initiator"]}, X-Interaction-Id=${sessionHeaders["X-Interaction-Id"]?.slice(0, 8)}...`,
+      `Compatible mode headers: X-Initiator=${sessionHeaders["X-Initiator"]}`,
     )
   }
 
