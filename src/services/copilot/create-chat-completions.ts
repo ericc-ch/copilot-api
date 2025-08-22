@@ -26,11 +26,6 @@ export const createChatCompletions = async (
     ...sessionHeaders, // This includes X-Initiator
   }
 
-  // Optional: Add debug logging
-  if (state.headerMode === "compatible") {
-    consola.debug(
-      `Compatible mode headers: X-Initiator=${sessionHeaders["X-Initiator"]}`,
-    )
   // Optional: Add debug logging for all modes
   consola.debug(
     `Headers (${state.headerMode} mode): X-Initiator=${sessionHeaders["X-Initiator"]}`,
