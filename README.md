@@ -162,7 +162,7 @@ The following command line options are available for the `start` command:
 | --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand)    | none       | -g    |
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config                 | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                              | false      | none  |
-| --header-mode  | Header mode: savings (cost-optimized) or compatible (VS Code extension behavior) | savings    | none  |
+| --header-mode  | Header mode: savings (cost-optimized) or per-user-prompt (mimics VS Code extension) | savings    | none  |
 
 ### Auth Command Options
 
@@ -340,7 +340,7 @@ bun run start
 
 ## Request Header Modes
 
-Copilot API supports two header modes to balance cost optimization with compatibility:
+Copilot API supports two header modes to balance cost optimization with different request patterns:
 
 ### `savings` Mode (Default)
 
@@ -356,14 +356,14 @@ copilot-api start
 copilot-api start --header-mode savings
 ```
 
-### `compatible` Mode
+### `per-user-prompt` Mode
 
-VS Code Copilot extension compatibility:
+VS Code Copilot extension behavior:
 
 - **Headers**: `X-Initiator`
 - **Logic**: If last message is user then it is user, otherwise agent
-- **Use case**: Use this when you want to mimic the behavior of the VS Code extension to avoid potential abuse detection. (I am not sure if they do that, but it's better to be cautious.)
+- **Use case**: Use this when you want to follow the VS Code extension's request pattern to avoid potential abuse detection. (I am not sure if they do that, but it's better to be cautious.)
 
 ```bash
-copilot-api start --header-mode compatible
+copilot-api start --header-mode per-user-prompt
 ```

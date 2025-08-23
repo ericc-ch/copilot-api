@@ -1,6 +1,6 @@
 import type { ChatCompletionsPayload } from "~/services/copilot/create-chat-completions"
 
-export type HeaderMode = "savings" | "compatible"
+export type HeaderMode = "savings" | "per-user-prompt"
 
 export interface RequestHeaders {
   "X-Initiator": "user" | "agent"
@@ -18,7 +18,7 @@ export function generateSessionHeaders(
     (payload: ChatCompletionsPayload) => "user" | "agent"
   > = {
     savings: getSavingsInitiator,
-    compatible: getCompatibleInitiator,
+    "per-user-prompt": getPerUserPromptInitiator,
   }
   return {
     "X-Initiator": initiatorMap[mode](payload),
@@ -38,13 +38,15 @@ function isAgentRole(role: string): boolean {
 function getSavingsInitiator(
   payload: ChatCompletionsPayload,
 ): "user" | "agent" {
-  return payload.messages.some((msg) => isAgentRole(msg.role)) ? "agent" : "user"
+  return payload.messages.some((msg) => isAgentRole(msg.role)) ?
+      "agent"
+    : "user"
 }
 
 /**
- * Compatible mode: if last message is user then it is user
+ * Per-user-prompt mode: if last message is user then it is user
  */
-function getCompatibleInitiator(
+function getPerUserPromptInitiator(
   payload: ChatCompletionsPayload,
 ): "user" | "agent" {
   const lastMessage = payload.messages.at(-1)

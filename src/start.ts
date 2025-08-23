@@ -43,10 +43,12 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.showToken = options.showToken
 
   // Set header mode
-  state.headerMode = options.headerMode as "savings" | "compatible"
+  state.headerMode = options.headerMode as "savings" | "per-user-prompt"
 
-  if (state.headerMode === "compatible") {
-    consola.info("Using compatible mode - VS Code extension compatibility")
+  if (state.headerMode === "per-user-prompt") {
+    consola.info(
+      "Using per-user-prompt mode - mimics VS Code extension behavior",
+    )
   } else {
     consola.info("Using savings mode - optimized for premium requests savings")
   }
@@ -184,7 +186,7 @@ export const start = defineCommand({
       type: "string",
       default: "savings",
       description:
-        "Header mode: savings (default, cost-optimized) or compatible (VS Code Copilot extension behavior)",
+        "Header mode: savings (default, cost-optimized) or per-user-prompt (VS Code Copilot extension behavior)",
     },
   },
   run({ args }) {

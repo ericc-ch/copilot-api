@@ -17,7 +17,7 @@ export interface State {
   lastRequestTimestamp?: number
 
   // Header mode configuration
-  headerMode: "savings" | "compatible"
+  headerMode: "savings" | "per-user-prompt"
 }
 
 export const state: State = {
