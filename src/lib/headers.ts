@@ -38,9 +38,7 @@ function isAgentRole(role: string): boolean {
 function getSavingsInitiator(
   payload: ChatCompletionsPayload,
 ): "user" | "agent" {
-  return payload.messages.some((msg) => isAgentRole(msg.role)) ?
-      "agent"
-    : "user"
+  return payload.messages.some((msg) => isAgentRole(msg.role)) ? "agent" : "user"
 }
 
 /**
