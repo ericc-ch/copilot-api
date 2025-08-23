@@ -3,6 +3,7 @@ import { events } from "fetch-event-stream"
 
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { generateSessionHeaders } from "~/lib/headers"
 import { state } from "~/lib/state"
 
 export const createChatCompletions = async (
@@ -16,17 +17,19 @@ export const createChatCompletions = async (
       && x.content?.some((x) => x.type === "image_url"),
   )
 
-  // Agent/user check for X-Initiator header
-  // Determine if any message is from an agent ("assistant" or "tool")
-  const isAgentCall = payload.messages.some((msg) =>
-    ["assistant", "tool"].includes(msg.role),
-  )
+  // Generate headers based on current mode
+  const sessionHeaders = generateSessionHeaders(payload, state.headerMode)
 
-  // Build headers and add X-Initiator
+  // Build headers
   const headers: Record<string, string> = {
     ...copilotHeaders(state, enableVision),
-    "X-Initiator": isAgentCall ? "agent" : "user",
+    ...sessionHeaders, // This includes X-Initiator
   }
+
+  // Optional: Add debug logging for all modes
+  consola.debug(
+    `Headers (${state.headerMode} mode): X-Initiator=${sessionHeaders["X-Initiator"]}`,
+  )
 
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
     method: "POST",
