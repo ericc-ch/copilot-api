@@ -13,12 +13,23 @@ export function generateSessionHeaders(
   payload: ChatCompletionsPayload,
   mode: HeaderMode,
 ): RequestHeaders {
-  return {
-    "X-Initiator":
-      mode === "savings" ?
-        getSavingsInitiator(payload)
-      : getCompatibleInitiator(payload),
+  const initiatorMap: Record<
+    HeaderMode,
+    (payload: ChatCompletionsPayload) => "user" | "agent"
+  > = {
+    savings: getSavingsInitiator,
+    compatible: getCompatibleInitiator,
   }
+  return {
+    "X-Initiator": initiatorMap[mode](payload),
+  }
+}
+
+/**
+ * Check if a message role is an agent role
+ */
+function isAgentRole(role: string): boolean {
+  return ["assistant", "tool"].includes(role)
 }
 
 /**
@@ -27,9 +38,7 @@ export function generateSessionHeaders(
 function getSavingsInitiator(
   payload: ChatCompletionsPayload,
 ): "user" | "agent" {
-  return (
-      payload.messages.some((msg) => ["assistant", "tool"].includes(msg.role))
-    ) ?
+  return payload.messages.some((msg) => isAgentRole(msg.role)) ?
       "agent"
     : "user"
 }
