@@ -20,6 +20,7 @@ const fetchMock = mock(
     }
   },
 )
+// @ts-expect-error - Mock fetch doesn't implement all fetch properties
 ;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock
 
 test("sets X-Initiator to agent if tool/assistant present", async () => {

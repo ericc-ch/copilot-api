@@ -42,8 +42,8 @@ export function translateChunkToAnthropicEvents(
         stop_reason: null,
         stop_sequence: null,
         usage: {
-          input_tokens: 1,
-          output_tokens: 1, // Anthropic requires this to be > 0
+          input_tokens: chunk.usage?.prompt_tokens ?? 0,
+          output_tokens: 0, // Will be updated in message_delta when finished
         },
       },
     })
@@ -152,7 +152,13 @@ export function translateChunkToAnthropicEvents(
           stop_sequence: null,
         },
         usage: {
-          output_tokens: 1,
+          input_tokens: chunk.usage?.prompt_tokens ?? 0,
+          output_tokens: chunk.usage?.completion_tokens ?? 0,
+          ...(chunk.usage?.prompt_tokens_details?.cached_tokens
+            !== undefined && {
+            cache_read_input_tokens:
+              chunk.usage.prompt_tokens_details.cached_tokens,
+          }),
         },
       },
       {

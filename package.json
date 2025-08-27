@@ -1,6 +1,6 @@
 {
   "name": "copilot-api",
-  "version": "0.5.12",
+  "version": "0.5.13",
   "description": "Turn GitHub Copilot into OpenAI/Anthropic API compatible server. Usable with Claude Code!",
   "keywords": [
     "proxy",
@@ -22,7 +22,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsdown",
     "dev": "bun run --watch ./src/main.ts",
     "knip": "knip-bun",
     "lint": "eslint . --cache",
@@ -44,20 +44,20 @@
     "consola": "^3.4.2",
     "fetch-event-stream": "^0.1.5",
     "gpt-tokenizer": "^3.0.1",
-    "hono": "^4.9.0",
+    "hono": "^4.9.4",
     "srvx": "^0.8.6",
     "tiny-invariant": "^1.3.3"
   },
   "devDependencies": {
-    "@echristian/eslint-config": "^0.0.52",
-    "@types/bun": "^1.2.19",
-    "bumpp": "^10.2.2",
-    "eslint": "^9.33.0",
-    "knip": "^5.62.0",
+    "@echristian/eslint-config": "^0.0.53",
+    "@types/bun": "^1.2.21",
+    "bumpp": "^10.2.3",
+    "eslint": "^9.34.0",
+    "knip": "^5.63.0",
     "lint-staged": "^16.1.5",
     "prettier-plugin-packagejson": "^2.5.19",
     "simple-git-hooks": "^2.13.1",
-    "tsup": "^8.5.0",
+    "tsdown": "^0.14.2",
     "typescript": "^5.9.2"
   }
 }

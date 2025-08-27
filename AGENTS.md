@@ -13,7 +13,8 @@
 - **Test all:**  
    `bun test`
 - **Test single file:**  
-   `bun test tests/claude-request.test.ts`- **Start (prod):**  
+   `bun test tests/claude-request.test.ts`
+- **Start (prod):**  
   `bun run start`
 
 ## Code Style Guidelines
@@ -35,7 +36,8 @@
 - **Modules:**  
   Use ESNext modules, no CommonJS.
 - **Testing:**  
-   Use Bun’s built-in test runner. Place tests in `tests/`, name as `*.test.ts`.- **Linting:**  
+   Use Bun's built-in test runner. Place tests in `tests/`, name as `*.test.ts`.
+- **Linting:**  
   Uses `@echristian/eslint-config` (see npm for details). Includes stylistic, unused imports, regex, and package.json rules.
 - **Paths:**  
   Use path aliases (`~/*`) for imports from `src/`.
