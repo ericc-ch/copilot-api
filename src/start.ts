@@ -29,7 +29,7 @@ interface RunServerOptions {
 }
 
 const formatModelInfo = (model: Model) => {
-  const contextWindow = model.capabilities.limits.max_context_window_tokens
+  const contextWindow = model.capabilities?.limits?.max_context_window_tokens
   const contextStr =
     contextWindow ? ` (${(contextWindow / 1000).toFixed(0)}K tokens)` : ""
   return `- ${model.id}${contextStr}`
