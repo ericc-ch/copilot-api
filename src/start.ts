@@ -6,6 +6,8 @@ import consola from "consola"
 import { serve, type ServerHandler } from "srvx"
 import invariant from "tiny-invariant"
 
+import type { Model } from "./services/copilot/get-models"
+
 import { ensurePaths } from "./lib/paths"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
@@ -24,6 +26,13 @@ interface RunServerOptions {
   claudeCode: boolean
   showToken: boolean
   headerMode: string
+}
+
+const formatModelInfo = (model: Model) => {
+  const contextWindow = model.capabilities.limits.max_context_window_tokens
+  const contextStr =
+    contextWindow ? ` (${(contextWindow / 1000).toFixed(0)}K tokens)` : ""
+  return `- ${model.id}${contextStr}`
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -68,7 +77,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   await cacheModels()
 
   consola.info(
-    `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
+    `Available models: \n${state.models?.data.map((model) => formatModelInfo(model)).join("\n")}`,
   )
 
   const serverUrl = `http://localhost:${options.port}`
