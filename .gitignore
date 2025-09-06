@@ -12,3 +12,5 @@ node_modules/
 
 # build output
 dist/
+
+.env
