@@ -159,6 +159,7 @@ The following command line options are available for the `start` command:
 | --manual       | Enable manual request approval                                                | false      | none  |
 | --rate-limit   | Rate limit in seconds between requests                                        | none       | -r    |
 | --wait         | Wait instead of error when rate limit is hit                                  | false      | -w    |
+| --timeout      | API timeout in milliseconds                                                   | 120000     | -t    |
 | --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand) | none       | -g    |
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
@@ -233,6 +234,9 @@ npx copilot-api@latest start --rate-limit 30
 
 # Wait instead of error when rate limit is hit
 npx copilot-api@latest start --rate-limit 30 --wait
+
+# Set API timeout to 3 minutes (180000 milliseconds)
+npx copilot-api@latest start --timeout 180000
 
 # Provide GitHub token directly
 npx copilot-api@latest start --github-token ghp_YOUR_TOKEN_HERE
@@ -335,4 +339,5 @@ bun run start
   - `--manual`: Enables manual approval for each request, giving you full control over when requests are sent.
   - `--rate-limit <seconds>`: Enforces a minimum time interval between requests. For example, `copilot-api start --rate-limit 30` will ensure there's at least a 30-second gap between requests.
   - `--wait`: Use this with `--rate-limit`. It makes the server wait for the cooldown period to end instead of rejecting the request with an error. This is useful for clients that don't automatically retry on rate limit errors.
+  - `--timeout <milliseconds>`: Sets the API timeout in milliseconds. For example, `copilot-api start --timeout 180000` will set a 3-minute timeout for all API calls. Default is 120000 (2 minutes).
 - If you have a GitHub business or enterprise plan account with Copilot, use the `--account-type` flag (e.g., `--account-type business`). See the [official documentation](https://docs.github.com/en/enterprise-cloud@latest/copilot/managing-copilot/managing-github-copilot-in-your-organization/managing-access-to-github-copilot-in-your-organization/managing-github-copilot-access-to-your-organizations-network#configuring-copilot-subscription-based-network-routing-for-your-enterprise-or-organization) for more details.

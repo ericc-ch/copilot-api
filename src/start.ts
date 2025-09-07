@@ -23,6 +23,7 @@ interface RunServerOptions {
   githubToken?: string
   claudeCode: boolean
   showToken: boolean
+  timeout?: number
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -40,6 +41,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.rateLimitSeconds = options.rateLimit
   state.rateLimitWait = options.rateLimitWait
   state.showToken = options.showToken
+  state.timeoutMs = options.timeout
 
   await ensurePaths()
   await cacheVSCodeVersion()
@@ -169,12 +171,22 @@ export const start = defineCommand({
       default: false,
       description: "Show GitHub and Copilot tokens on fetch and refresh",
     },
+    timeout: {
+      alias: "t",
+      type: "string",
+      description: "API timeout in milliseconds (default: 120000)",
+    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
     const rateLimit =
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       rateLimitRaw === undefined ? undefined : Number.parseInt(rateLimitRaw, 10)
+
+    const timeoutRaw = args.timeout
+    const timeout =
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      timeoutRaw === undefined ? 120000 : Number.parseInt(timeoutRaw, 10)
 
     return runServer({
       port: Number.parseInt(args.port, 10),
@@ -186,6 +198,7 @@ export const start = defineCommand({
       githubToken: args["github-token"],
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
+      timeout,
     })
   },
 })

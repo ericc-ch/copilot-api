@@ -5,15 +5,28 @@ import { state } from "~/lib/state"
 export const createEmbeddings = async (payload: EmbeddingRequest) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
-  const response = await fetch(`${copilotBaseUrl(state)}/embeddings`, {
-    method: "POST",
-    headers: copilotHeaders(state),
-    body: JSON.stringify(payload),
-  })
+  // Setup timeout with AbortController
+  const controller = new AbortController()
+  const timeoutMs = state.timeoutMs ?? 120000 // Default to 2 minutes
+  const timeout = setTimeout(() => {
+    controller.abort()
+  }, timeoutMs)
 
-  if (!response.ok) throw new HTTPError("Failed to create embeddings", response)
+  try {
+    const response = await fetch(`${copilotBaseUrl(state)}/embeddings`, {
+      method: "POST",
+      headers: copilotHeaders(state),
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
 
-  return (await response.json()) as EmbeddingResponse
+    if (!response.ok)
+      throw new HTTPError("Failed to create embeddings", response)
+
+    return (await response.json()) as EmbeddingResponse
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 export interface EmbeddingRequest {

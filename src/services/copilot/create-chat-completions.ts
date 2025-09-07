@@ -28,22 +28,34 @@ export const createChatCompletions = async (
     "X-Initiator": isAgentCall ? "agent" : "user",
   }
 
-  const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  })
+  // Setup timeout with AbortController
+  const controller = new AbortController()
+  const timeoutMs = state.timeoutMs ?? 120000 // Default to 2 minutes
+  const timeout = setTimeout(() => {
+    controller.abort()
+  }, timeoutMs)
 
-  if (!response.ok) {
-    consola.error("Failed to create chat completions", response)
-    throw new HTTPError("Failed to create chat completions", response)
+  try {
+    const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      consola.error("Failed to create chat completions", response)
+      throw new HTTPError("Failed to create chat completions", response)
+    }
+
+    if (payload.stream) {
+      return events(response)
+    }
+
+    return (await response.json()) as ChatCompletionResponse
+  } finally {
+    clearTimeout(timeout)
   }
-
-  if (payload.stream) {
-    return events(response)
-  }
-
-  return (await response.json()) as ChatCompletionResponse
 }
 
 // Streaming types

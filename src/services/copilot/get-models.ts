@@ -3,13 +3,25 @@ import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
 export const getModels = async () => {
-  const response = await fetch(`${copilotBaseUrl(state)}/models`, {
-    headers: copilotHeaders(state),
-  })
+  // Setup timeout with AbortController
+  const controller = new AbortController()
+  const timeoutMs = state.timeoutMs ?? 120000 // Default to 2 minutes
+  const timeout = setTimeout(() => {
+    controller.abort()
+  }, timeoutMs)
 
-  if (!response.ok) throw new HTTPError("Failed to get models", response)
+  try {
+    const response = await fetch(`${copilotBaseUrl(state)}/models`, {
+      headers: copilotHeaders(state),
+      signal: controller.signal,
+    })
 
-  return (await response.json()) as ModelsResponse
+    if (!response.ok) throw new HTTPError("Failed to get models", response)
+
+    return (await response.json()) as ModelsResponse
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 export interface ModelsResponse {

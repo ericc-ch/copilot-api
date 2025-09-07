@@ -5,20 +5,33 @@ import {
   standardHeaders,
 } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { state } from "~/lib/state"
 
 export async function getDeviceCode(): Promise<DeviceCodeResponse> {
-  const response = await fetch(`${GITHUB_BASE_URL}/login/device/code`, {
-    method: "POST",
-    headers: standardHeaders(),
-    body: JSON.stringify({
-      client_id: GITHUB_CLIENT_ID,
-      scope: GITHUB_APP_SCOPES,
-    }),
-  })
+  // Setup timeout with AbortController
+  const controller = new AbortController()
+  const timeoutMs = state.timeoutMs ?? 120000 // Default to 2 minutes
+  const timeout = setTimeout(() => {
+    controller.abort()
+  }, timeoutMs)
 
-  if (!response.ok) throw new HTTPError("Failed to get device code", response)
+  try {
+    const response = await fetch(`${GITHUB_BASE_URL}/login/device/code`, {
+      method: "POST",
+      headers: standardHeaders(),
+      body: JSON.stringify({
+        client_id: GITHUB_CLIENT_ID,
+        scope: GITHUB_APP_SCOPES,
+      }),
+      signal: controller.signal,
+    })
 
-  return (await response.json()) as DeviceCodeResponse
+    if (!response.ok) throw new HTTPError("Failed to get device code", response)
+
+    return (await response.json()) as DeviceCodeResponse
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 export interface DeviceCodeResponse {

@@ -3,15 +3,30 @@ import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
 export const getCopilotUsage = async (): Promise<CopilotUsageResponse> => {
-  const response = await fetch(`${GITHUB_API_BASE_URL}/copilot_internal/user`, {
-    headers: githubHeaders(state),
-  })
+  // Setup timeout with AbortController
+  const controller = new AbortController()
+  const timeoutMs = state.timeoutMs ?? 120000 // Default to 2 minutes
+  const timeout = setTimeout(() => {
+    controller.abort()
+  }, timeoutMs)
 
-  if (!response.ok) {
-    throw new HTTPError("Failed to get Copilot usage", response)
+  try {
+    const response = await fetch(
+      `${GITHUB_API_BASE_URL}/copilot_internal/user`,
+      {
+        headers: githubHeaders(state),
+        signal: controller.signal,
+      },
+    )
+
+    if (!response.ok) {
+      throw new HTTPError("Failed to get Copilot usage", response)
+    }
+
+    return (await response.json()) as CopilotUsageResponse
+  } finally {
+    clearTimeout(timeout)
   }
-
-  return (await response.json()) as CopilotUsageResponse
 }
 
 export interface QuotaDetail {

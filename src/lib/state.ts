@@ -15,6 +15,9 @@ export interface State {
   // Rate limiting configuration
   rateLimitSeconds?: number
   lastRequestTimestamp?: number
+
+  // API timeout configuration
+  timeoutMs?: number
 }
 
 export const state: State = {
