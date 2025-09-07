@@ -161,6 +161,8 @@ The following command line options are available for the `start` command:
 | --wait         | Wait instead of error when rate limit is hit                                  | false      | -w    |
 | --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand) | none       | -g    |
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
+| --model        | Model to use with Claude Code (requires --claude-code)                        | none       | -m    |
+| --small-model  | Small/fast model to use with Claude Code (requires --claude-code)             | none       | -s    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
 
 ### Auth Command Options
@@ -290,7 +292,26 @@ npx copilot-api@latest start --claude-code
 
 You will be prompted to select a primary model and a "small, fast" model for background tasks. After selecting the models, a command will be copied to your clipboard. This command sets the necessary environment variables for Claude Code to use the proxy.
 
-Paste and run this command in a new terminal to launch Claude Code.
+### Non-Interactive Setup with Model Selection
+
+You can also specify the models directly on the command line to skip the interactive prompts:
+
+```sh
+# Specify both models directly (example with common model names)
+npx copilot-api@latest start --claude-code --model "claude-3.5-sonnet" --small-model "claude-3.5-haiku"
+
+# Short aliases also work
+npx copilot-api@latest start -c -m "claude-3.5-sonnet" -s "claude-3.5-haiku"
+```
+
+This is particularly useful for:
+- Automation scripts and CI/CD pipelines
+- Avoiding repetitive model selection during development
+- Quickly switching between different model configurations
+
+Note: Both `--model` and `--small-model` must be specified together when using command-line model selection. The models you specify must be available in your Copilot account.
+
+After running the command with `--claude-code`, paste and run the command copied to your clipboard in a new terminal to launch Claude Code.
 
 ### Manual Configuration with `settings.json`
 

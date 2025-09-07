@@ -3,6 +3,7 @@
 import { defineCommand } from "citty"
 import clipboard from "clipboardy"
 import consola from "consola"
+import process from "node:process"
 import { serve, type ServerHandler } from "srvx"
 import invariant from "tiny-invariant"
 
@@ -23,6 +24,8 @@ interface RunServerOptions {
   githubToken?: string
   claudeCode: boolean
   showToken: boolean
+  model?: string
+  smallModel?: string
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -63,21 +66,54 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   if (options.claudeCode) {
     invariant(state.models, "Models should be loaded by now")
 
-    const selectedModel = await consola.prompt(
-      "Select a model to use with Claude Code",
-      {
-        type: "select",
-        options: state.models.data.map((model) => model.id),
-      },
-    )
+    let selectedModel: string
+    let selectedSmallModel: string
 
-    const selectedSmallModel = await consola.prompt(
-      "Select a small model to use with Claude Code",
-      {
-        type: "select",
-        options: state.models.data.map((model) => model.id),
-      },
-    )
+    // Check if models are provided via command line
+    if (options.model && options.smallModel) {
+      // Validate provided models
+      const availableModelIds = state.models.data.map((model) => model.id)
+
+      if (!availableModelIds.includes(options.model)) {
+        consola.error(`Invalid model: ${options.model}`)
+        consola.info(`Available models: \n${availableModelIds.join("\n")}`)
+        process.exit(1)
+      }
+
+      if (!availableModelIds.includes(options.smallModel)) {
+        consola.error(`Invalid small model: ${options.smallModel}`)
+        consola.info(`Available models: \n${availableModelIds.join("\n")}`)
+        process.exit(1)
+      }
+
+      selectedModel = options.model
+      selectedSmallModel = options.smallModel
+      consola.info(`Using model: ${selectedModel}`)
+      consola.info(`Using small model: ${selectedSmallModel}`)
+    } else if (options.model || options.smallModel) {
+      // If only one model is provided, show error
+      consola.error(
+        "Both --model and --small-model must be specified when using command-line model selection",
+      )
+      process.exit(1)
+    } else {
+      // Fall back to interactive selection
+      selectedModel = await consola.prompt(
+        "Select a model to use with Claude Code",
+        {
+          type: "select",
+          options: state.models.data.map((model) => model.id),
+        },
+      )
+
+      selectedSmallModel = await consola.prompt(
+        "Select a small model to use with Claude Code",
+        {
+          type: "select",
+          options: state.models.data.map((model) => model.id),
+        },
+      )
+    }
 
     const command = generateEnvScript(
       {
@@ -164,6 +200,17 @@ export const start = defineCommand({
       description:
         "Generate a command to launch Claude Code with Copilot API config",
     },
+    model: {
+      alias: "m",
+      type: "string",
+      description: "Model to use with Claude Code (requires --claude-code)",
+    },
+    "small-model": {
+      alias: "s",
+      type: "string",
+      description:
+        "Small/fast model to use with Claude Code (requires --claude-code)",
+    },
     "show-token": {
       type: "boolean",
       default: false,
@@ -185,6 +232,8 @@ export const start = defineCommand({
       rateLimitWait: args.wait,
       githubToken: args["github-token"],
       claudeCode: args["claude-code"],
+      model: args.model,
+      smallModel: args["small-model"],
       showToken: args["show-token"],
     })
   },
