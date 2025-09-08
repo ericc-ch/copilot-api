@@ -6,6 +6,8 @@ import consola from "consola"
 import { serve, type ServerHandler } from "srvx"
 import invariant from "tiny-invariant"
 
+import type { Model } from "./services/copilot/get-models"
+
 import { ensurePaths } from "./lib/paths"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
@@ -23,6 +25,14 @@ interface RunServerOptions {
   githubToken?: string
   claudeCode: boolean
   showToken: boolean
+  headerMode: string
+}
+
+const formatModelInfo = (model: Model) => {
+  const contextWindow = model.capabilities?.limits?.max_context_window_tokens
+  const contextStr =
+    contextWindow ? ` (${(contextWindow / 1000).toFixed(0)}K tokens)` : ""
+  return `- ${model.id}${contextStr}`
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -41,10 +51,22 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.rateLimitWait = options.rateLimitWait
   state.showToken = options.showToken
 
+  // Set header mode
+  state.headerMode = options.headerMode as "savings" | "per-user-prompt"
+
+  if (state.headerMode === "per-user-prompt") {
+    consola.info(
+      "Using per-user-prompt mode - mimics VS Code extension behavior",
+    )
+  } else {
+    consola.info("Using savings mode - optimized for premium requests savings")
+  }
+
   await ensurePaths()
   await cacheVSCodeVersion()
 
   if (options.githubToken) {
+    // eslint-disable-next-line require-atomic-updates
     state.githubToken = options.githubToken
     consola.info("Using provided GitHub token")
   } else {
@@ -55,7 +77,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   await cacheModels()
 
   consola.info(
-    `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
+    `Available models: \n${state.models?.data.map((model) => formatModelInfo(model)).join("\n")}`,
   )
 
   const serverUrl = `http://localhost:${options.port}`
@@ -169,6 +191,12 @@ export const start = defineCommand({
       default: false,
       description: "Show GitHub and Copilot tokens on fetch and refresh",
     },
+    "header-mode": {
+      type: "string",
+      default: "savings",
+      description:
+        "Header mode: savings (default, cost-optimized) or per-user-prompt (VS Code Copilot extension behavior)",
+    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
@@ -186,6 +214,7 @@ export const start = defineCommand({
       githubToken: args["github-token"],
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
+      headerMode: args["header-mode"],
     })
   },
 })

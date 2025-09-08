@@ -6,6 +6,7 @@ import { streamSSE } from "hono/streaming"
 import { awaitApproval } from "~/lib/approval"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
+import { getTokenCount } from "~/lib/tokenizer"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
@@ -89,3 +90,22 @@ export async function handleCompletion(c: Context) {
 const isNonStreaming = (
   response: Awaited<ReturnType<typeof createChatCompletions>>,
 ): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
+
+export async function handleCountTokens(c: Context) {
+  const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+  consola.debug("Count tokens request:", JSON.stringify(anthropicPayload))
+
+  // Convert Anthropic format to OpenAI format for token counting
+  const openAIPayload = translateToOpenAI(anthropicPayload)
+
+  // Calculate tokens using our existing tokenizer
+  const tokenCounts = getTokenCount(openAIPayload.messages)
+
+  // Return in Anthropic format
+  const response = {
+    input_tokens: tokenCounts.input,
+  }
+
+  consola.debug("Token count response:", JSON.stringify(response))
+  return c.json(response)
+}
