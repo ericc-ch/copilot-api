@@ -103,7 +103,7 @@ function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
       newMessages.push({
         role: "tool",
         tool_call_id: block.tool_use_id,
-        content: block.content,
+        content: mapContent(block.content),
       })
     }
 
