@@ -12,3 +12,5 @@ node_modules/
 
 # build output
 dist/
+logs/gemini-debug.log
+logs/gemini-translation.log
