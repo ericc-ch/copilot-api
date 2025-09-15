@@ -53,6 +53,7 @@ export interface GeminiFunctionDeclaration {
   name: string
   description?: string
   parameters: Record<string, unknown>
+  parametersJsonSchema?: Record<string, unknown>
 }
 
 export interface GeminiToolConfig {

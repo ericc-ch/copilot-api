@@ -66,11 +66,41 @@ export function translateGeminiToOpenAIStream(
   return result
 }
 
+// Helper function to process function response arrays
+function processFunctionResponseArray(
+  responseArray: Array<{
+    functionResponse: { name: string; response: unknown }
+  }>,
+  pendingToolCalls: Map<string, string>,
+  messages: Array<Message>,
+): void {
+  for (const responseItem of responseArray) {
+    if ("functionResponse" in responseItem) {
+      const functionName = responseItem.functionResponse.name
+      const toolCallId = pendingToolCalls.get(functionName)
+      if (toolCallId) {
+        messages.push({
+          role: "tool",
+          tool_call_id: toolCallId,
+          content: JSON.stringify(responseItem.functionResponse.response),
+        })
+        pendingToolCalls.delete(functionName)
+      }
+    }
+  }
+}
+
 function translateGeminiContentsToOpenAI(
-  contents: Array<GeminiContent>,
+  contents: Array<
+    | GeminiContent
+    | Array<{
+        functionResponse: { id?: string; name: string; response: unknown }
+      }>
+  >,
   systemInstruction?: GeminiContent,
 ): Array<Message> {
   const messages: Array<Message> = []
+  const pendingToolCalls = new Map<string, string>() // function name -> tool_call_id
 
   // Add system instruction first if present
   if (systemInstruction) {
@@ -81,7 +111,14 @@ function translateGeminiContentsToOpenAI(
   }
 
   // Process conversation contents
-  for (const content of contents) {
+  for (const item of contents) {
+    // Handle special case where Gemini CLI sends function responses as nested arrays
+    if (Array.isArray(item)) {
+      processFunctionResponseArray(item, pendingToolCalls, messages)
+      continue
+    }
+
+    const content = item
     const role = content.role === "model" ? "assistant" : "user"
 
     // Check for function calls/responses
@@ -95,28 +132,39 @@ function translateGeminiContentsToOpenAI(
     if (functionResponses.length > 0) {
       // Add tool result messages
       for (const funcResponse of functionResponses) {
-        messages.push({
-          role: "tool",
-          tool_call_id: generateToolCallId(funcResponse.functionResponse.name),
-          content: JSON.stringify(funcResponse.functionResponse.response),
-        })
+        const functionName = funcResponse.functionResponse.name
+        const toolCallId = pendingToolCalls.get(functionName)
+        if (toolCallId) {
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCallId,
+            content: JSON.stringify(funcResponse.functionResponse.response),
+          })
+          pendingToolCalls.delete(functionName)
+        }
       }
     }
 
     if (functionCalls.length > 0 && role === "assistant") {
       // Assistant message with tool calls
       const textContent = extractTextFromGeminiContent(content)
-      messages.push({
-        role: "assistant",
-        content: textContent || null,
-        tool_calls: functionCalls.map((call) => ({
-          id: generateToolCallId(call.functionCall.name),
-          type: "function",
+      const toolCalls = functionCalls.map((call) => {
+        const toolCallId = generateToolCallId(call.functionCall.name)
+        // Remember this tool call for later matching with responses
+        pendingToolCalls.set(call.functionCall.name, toolCallId)
+        return {
+          id: toolCallId,
+          type: "function" as const,
           function: {
             name: call.functionCall.name,
             arguments: JSON.stringify(call.functionCall.args),
           },
-        })),
+        }
+      })
+      messages.push({
+        role: "assistant",
+        content: textContent || null,
+        tool_calls: toolCalls,
       })
     } else {
       // Regular message
@@ -180,7 +228,7 @@ function translateGeminiToolsToOpenAI(
         function: {
           name: func.name,
           description: func.description,
-          parameters: func.parameters,
+          parameters: func.parametersJsonSchema || func.parameters,
         },
       })
     }
