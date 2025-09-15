@@ -31,6 +31,13 @@ import {
   type GeminiResponse,
 } from "./gemini-types"
 
+// Helper function to extract model from URL path
+function extractModelFromUrl(url: string): string | undefined {
+  const path = new URL(url).pathname
+  const match = path.match(/^\/v1beta\/models\/([^:]+):/)
+  return match?.[1]
+}
+
 // Debug logging interface
 interface GeminiDebugLog {
   timestamp: string
@@ -280,7 +287,11 @@ function getErrorStatusAndMessage(error: unknown): {
 // Standard generation endpoint
 export async function handleGeminiGeneration(c: Context) {
   const endpoint = c.req.url
-  const model = c.req.param("model")
+  const model = extractModelFromUrl(endpoint)
+
+  if (!model) {
+    return c.json({ error: "Model name is required in URL path" }, 400)
+  }
 
   // IMMEDIATE DEBUG: Log that we entered this handler
   logGeminiDebug("handler_entry_GENERATION", endpoint, {
@@ -525,7 +536,11 @@ async function ensureCompleteStream(
 // Streaming generation endpoint
 export async function handleGeminiStreamGeneration(c: Context) {
   const endpoint = c.req.url
-  const model = c.req.param("model")
+  const model = extractModelFromUrl(endpoint)
+
+  if (!model) {
+    return c.json({ error: "Model name is required in URL path" }, 400)
+  }
 
   logGeminiDebug("handler_entry", endpoint, {
     data: {
@@ -581,7 +596,11 @@ export async function handleGeminiStreamGeneration(c: Context) {
 // Token counting endpoint
 export async function handleGeminiCountTokens(c: Context) {
   const endpoint = c.req.url
-  const model = c.req.param("model")
+  const model = extractModelFromUrl(endpoint)
+
+  if (!model) {
+    return c.json({ error: "Model name is required in URL path" }, 400)
+  }
 
   // IMMEDIATE DEBUG: Log that we entered this handler
   logGeminiDebug("handler_entry_TOKENS", endpoint, {

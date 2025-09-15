@@ -26,10 +26,10 @@ import {
 
 export function translateGeminiToOpenAINonStream(
   payload: GeminiRequest,
-  model?: string,
+  model: string,
 ): ChatCompletionsPayload {
   return {
-    model: model || "claude-sonnet-4", // Use provided model or default
+    model, // Always use the model from the URL
     messages: translateGeminiContentsToOpenAI(
       payload.contents,
       payload.systemInstruction,
@@ -46,10 +46,10 @@ export function translateGeminiToOpenAINonStream(
 
 export function translateGeminiToOpenAIStream(
   payload: GeminiRequest,
-  model?: string,
+  model: string,
 ): ChatCompletionsPayload {
   const result = {
-    model: model || "claude-sonnet-4", // Use provided model or default
+    model, // Always use the model from the URL
     messages: translateGeminiContentsToOpenAI(
       payload.contents,
       payload.systemInstruction,
@@ -417,10 +417,10 @@ export function translateOpenAIChunkToGemini(chunk: ChatCompletionChunk): {
 
 export function translateGeminiCountTokensToOpenAI(
   request: GeminiCountTokensRequest,
-  model?: string,
+  model: string,
 ): ChatCompletionsPayload {
   return {
-    model: model || "claude-sonnet-4",
+    model,
     messages: translateGeminiContentsToOpenAI(
       request.contents,
       request.systemInstruction,
