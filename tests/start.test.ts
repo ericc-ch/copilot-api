@@ -27,16 +27,16 @@ const mockProcessExit = mock(() => {
 })
 
 // Replace imports with mocks
-mock.module("../src/lib/state", () => ({
+void mock.module("../src/lib/state", () => ({
   state: mockState,
 }))
 
-mock.module("consola", () => ({
+void mock.module("consola", () => ({
   default: mockConsola,
   ...mockConsola,
 }))
 
-mock.module("node:process", () => ({
+void mock.module("node:process", () => ({
   default: {
     exit: mockProcessExit,
   },
@@ -48,17 +48,17 @@ function validateModels(
   providedSmallModel: string | undefined,
   availableModels: Array<{ id: string }>,
 ): { isValid: boolean; error?: string } {
-  const availableModelIds = availableModels.map((model) => model.id)
+  const availableModelIds = new Set(availableModels.map((model) => model.id))
 
   // Both models provided
   if (providedModel && providedSmallModel) {
-    if (!availableModelIds.includes(providedModel)) {
+    if (!availableModelIds.has(providedModel)) {
       return {
         isValid: false,
         error: `Invalid model: ${providedModel}`,
       }
     }
-    if (!availableModelIds.includes(providedSmallModel)) {
+    if (!availableModelIds.has(providedSmallModel)) {
       return {
         isValid: false,
         error: `Invalid small model: ${providedSmallModel}`,
@@ -71,12 +71,53 @@ function validateModels(
   if (providedModel !== undefined || providedSmallModel !== undefined) {
     return {
       isValid: false,
-      error: "Both --model and --small-model must be specified when using command-line model selection",
+      error:
+        "Both --model and --small-model must be specified when using command-line model selection",
     }
   }
 
   // No models provided (interactive mode)
   return { isValid: true }
+}
+
+// Helper function to simulate CLI argument parsing
+function parseCliArgs(args: Array<string>): {
+  model?: string
+  smallModel?: string
+  claudeCode: boolean
+} {
+  const parsed: { model?: string; smallModel?: string; claudeCode: boolean } = {
+    claudeCode: false,
+  }
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    switch (arg) {
+      case "--model":
+      case "-m": {
+        parsed.model = args[i + 1]
+        i++ // Skip next arg as it's the value
+        break
+      }
+      case "--small-model":
+      case "-s": {
+        parsed.smallModel = args[i + 1]
+        i++ // Skip next arg as it's the value
+        break
+      }
+      case "--claude-code":
+      case "-c": {
+        parsed.claudeCode = true
+        break
+      }
+      default: {
+        // Unknown argument, ignore
+        break
+      }
+    }
+  }
+
+  return parsed
 }
 
 describe("Model Validation Logic", () => {
@@ -229,39 +270,6 @@ describe("CLI Argument Scenarios", () => {
 })
 
 describe("CLI Argument Parsing", () => {
-  // Helper function to simulate CLI argument parsing
-  function parseCliArgs(args: string[]): {
-    model?: string
-    smallModel?: string
-    claudeCode: boolean
-  } {
-    const parsed: { model?: string; smallModel?: string; claudeCode: boolean } = {
-      claudeCode: false,
-    }
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i]
-      switch (arg) {
-        case "--model":
-        case "-m":
-          parsed.model = args[i + 1]
-          i++ // Skip next arg as it's the value
-          break
-        case "--small-model":
-        case "-s":
-          parsed.smallModel = args[i + 1]
-          i++ // Skip next arg as it's the value
-          break
-        case "--claude-code":
-        case "-c":
-          parsed.claudeCode = true
-          break
-      }
-    }
-
-    return parsed
-  }
-
   test("should parse model arguments with long flags", () => {
     const args = [
       "--claude-code",
@@ -287,7 +295,13 @@ describe("CLI Argument Parsing", () => {
   })
 
   test("should handle mixed long and short flags", () => {
-    const args = ["--claude-code", "-m", "claude-3-5-sonnet-20241022", "--small-model", "gpt-4o-mini"]
+    const args = [
+      "--claude-code",
+      "-m",
+      "claude-3-5-sonnet-20241022",
+      "--small-model",
+      "gpt-4o-mini",
+    ]
     const result = parseCliArgs(args)
 
     expect(result.claudeCode).toBe(true)
@@ -349,13 +363,17 @@ describe("Error Handling Scenarios", () => {
     )
 
     expect(result.isValid).toBe(false)
-    expect(result.error).toContain("Both --model and --small-model must be specified")
+    expect(result.error).toContain(
+      "Both --model and --small-model must be specified",
+    )
   })
 
   test("should handle empty string models", () => {
     const result = validateModels("", "", mockState.models.data)
 
     expect(result.isValid).toBe(false)
-    expect(result.error).toBe("Both --model and --small-model must be specified when using command-line model selection")
+    expect(result.error).toBe(
+      "Both --model and --small-model must be specified when using command-line model selection",
+    )
   })
 })
