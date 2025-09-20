@@ -27,7 +27,7 @@ const chatCompletionRequestSchema = z.object({
   messages: z.array(messageSchema).min(1, "Messages array cannot be empty."),
   model: z.string(),
   frequency_penalty: z.number().min(-2).max(2).optional().nullable(),
-  logit_bias: z.record(z.number()).optional().nullable(),
+  logit_bias: z.record(z.string(), z.number()).optional().nullable(),
   logprobs: z.boolean().optional().nullable(),
   top_logprobs: z.number().int().min(0).max(20).optional().nullable(),
   max_tokens: z.number().int().optional().nullable(),

@@ -26,7 +26,7 @@
     "dev": "bun run --watch ./src/main.ts",
     "knip": "knip-bun",
     "lint": "eslint . --cache",
-    "prepack": "bun run build",
+    "prepack": "npm run build",
     "prepare": "simple-git-hooks",
     "release": "bumpp && bun publish --access public",
     "start": "NODE_ENV=production bun run ./src/main.ts",

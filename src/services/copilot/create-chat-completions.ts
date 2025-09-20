@@ -3,6 +3,7 @@ import { events } from "fetch-event-stream"
 
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { sanitizePayload } from "~/lib/sanitize"
 import { state } from "~/lib/state"
 
 export const createChatCompletions = async (
@@ -10,7 +11,10 @@ export const createChatCompletions = async (
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
-  const enableVision = payload.messages.some(
+  // Sanitize payload to remove ANSI escape sequences and problematic Unicode characters
+  const sanitizedPayload = sanitizePayload(payload)
+
+  const enableVision = sanitizedPayload.messages.some(
     (x) =>
       typeof x.content !== "string"
       && x.content?.some((x) => x.type === "image_url"),
@@ -18,7 +22,7 @@ export const createChatCompletions = async (
 
   // Agent/user check for X-Initiator header
   // Determine if any message is from an agent ("assistant" or "tool")
-  const isAgentCall = payload.messages.some((msg) =>
+  const isAgentCall = sanitizedPayload.messages.some((msg) =>
     ["assistant", "tool"].includes(msg.role),
   )
 
@@ -31,7 +35,7 @@ export const createChatCompletions = async (
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
     method: "POST",
     headers,
-    body: JSON.stringify(payload),
+    body: JSON.stringify(sanitizedPayload),
   })
 
   if (!response.ok) {
@@ -39,7 +43,7 @@ export const createChatCompletions = async (
     throw new HTTPError("Failed to create chat completions", response)
   }
 
-  if (payload.stream) {
+  if (sanitizedPayload.stream) {
     return events(response)
   }
 
