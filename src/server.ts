@@ -4,6 +4,7 @@ import { logger } from "hono/logger"
 
 import { completionRoutes } from "./routes/chat-completions/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
+import { geminiRouter } from "./routes/generate-content/route"
 import { messageRoutes } from "./routes/messages/route"
 import { modelRoutes } from "./routes/models/route"
 import { tokenRoute } from "./routes/token/route"
@@ -26,6 +27,7 @@ server.route("/token", tokenRoute)
 server.route("/v1/chat/completions", completionRoutes)
 server.route("/v1/models", modelRoutes)
 server.route("/v1/embeddings", embeddingRoutes)
+server.route("/", geminiRouter)
 
 // Anthropic compatible endpoints
 server.route("/v1/messages", messageRoutes)
