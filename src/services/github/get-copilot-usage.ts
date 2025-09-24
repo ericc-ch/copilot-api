@@ -4,6 +4,7 @@ import { state } from "~/lib/state"
 
 export const getCopilotUsage = async (): Promise<CopilotUsageResponse> => {
   const response = await fetch(`${GITHUB_API_BASE_URL}/copilot_internal/user`, {
+    proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
     headers: githubHeaders(state),
   })
 

@@ -4,6 +4,7 @@ import { state } from "~/lib/state"
 
 export async function getGitHubUser() {
   const response = await fetch(`${GITHUB_API_BASE_URL}/user`, {
+    proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
     headers: {
       authorization: `token ${state.githubToken}`,
       ...standardHeaders(),

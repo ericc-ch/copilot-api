@@ -11,6 +11,7 @@ export async function getVSCodeVersion() {
       "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=visual-studio-code-bin",
       {
         signal: controller.signal,
+        proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
       },
     )
 

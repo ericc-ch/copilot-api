@@ -23,6 +23,7 @@ export async function pollAccessToken(
       {
         method: "POST",
         headers: standardHeaders(),
+        proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
         body: JSON.stringify({
           client_id: GITHUB_CLIENT_ID,
           device_code: deviceCode.device_code,

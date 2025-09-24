@@ -30,6 +30,7 @@ export const createChatCompletions = async (
 
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
     method: "POST",
+    proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
     headers,
     body: JSON.stringify(payload),
   })

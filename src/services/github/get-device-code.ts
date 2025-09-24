@@ -10,6 +10,7 @@ export async function getDeviceCode(): Promise<DeviceCodeResponse> {
   const response = await fetch(`${GITHUB_BASE_URL}/login/device/code`, {
     method: "POST",
     headers: standardHeaders(),
+    proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
     body: JSON.stringify({
       client_id: GITHUB_CLIENT_ID,
       scope: GITHUB_APP_SCOPES,

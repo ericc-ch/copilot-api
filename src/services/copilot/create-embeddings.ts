@@ -7,6 +7,7 @@ export const createEmbeddings = async (payload: EmbeddingRequest) => {
 
   const response = await fetch(`${copilotBaseUrl(state)}/embeddings`, {
     method: "POST",
+    proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
     headers: copilotHeaders(state),
     body: JSON.stringify(payload),
   })

@@ -5,6 +5,7 @@ import { state } from "~/lib/state"
 export const getModels = async () => {
   const response = await fetch(`${copilotBaseUrl(state)}/models`, {
     headers: copilotHeaders(state),
+    proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY,
   })
 
   if (!response.ok) throw new HTTPError("Failed to get models", response)
