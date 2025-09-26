@@ -536,7 +536,7 @@ export function translateOpenAIToGemini(
     },
   }
 
-  // Debug: Log original GitHub Copilot response and translated Gemini response for comparison
+  // Debug: Log original GitHub Copilot response and translated Gemini response
   if (process.env.DEBUG_GEMINI_REQUESTS === "true") {
     DebugLogger.logResponseComparison(response, result, {
       context: "Non-Stream Response Translation",
