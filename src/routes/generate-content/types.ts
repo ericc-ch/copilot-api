@@ -4,9 +4,9 @@ export interface GeminiRequest {
   contents: Array<GeminiContent>
   tools?: Array<GeminiTool>
   toolConfig?: GeminiToolConfig
-  safetySettings?: Array<GeminiSafetySetting>
+  safetySettings?: Array<Record<string, unknown>>
   systemInstruction?: GeminiContent
-  generationConfig?: GeminiGenerationConfig
+  generationConfig?: Record<string, unknown>
 }
 
 export interface GeminiContent {
@@ -16,15 +16,15 @@ export interface GeminiContent {
 
 export type GeminiPart =
   | GeminiTextPart
-  | GeminiInlineDataPart
   | GeminiFunctionCallPart
   | GeminiFunctionResponsePart
+  | GeminiInlineDataPart
 
 export interface GeminiTextPart {
   text: string
 }
 
-export interface GeminiInlineDataPart {
+interface GeminiInlineDataPart {
   inlineData: {
     mimeType: string
     data: string
@@ -51,48 +51,25 @@ export interface GeminiTool {
   urlContext?: Record<string, unknown>
 }
 
-export interface GeminiFunctionDeclaration {
+interface GeminiFunctionDeclaration {
   name: string
   description?: string
   parameters?: Record<string, unknown>
   parametersJsonSchema?: Record<string, unknown>
 }
 
-export interface GeminiToolConfig {
+interface GeminiToolConfig {
   functionCallingConfig: {
     mode: "AUTO" | "ANY" | "NONE"
     allowedFunctionNames?: Array<string>
   }
 }
 
-export interface GeminiSafetySetting {
-  category: string
-  threshold: string
-}
-
-export interface GeminiGenerationConfig {
-  stopSequences?: Array<string>
-  temperature?: number
-  maxOutputTokens?: number
-  topP?: number
-  topK?: number
-}
-
 // Response types
 export interface GeminiResponse {
   candidates: Array<GeminiCandidate>
   usageMetadata?: GeminiUsageMetadata
-  promptFeedback?: GeminiPromptFeedback
-}
-
-export interface GeminiPromptFeedback {
-  blockReason?:
-    | "BLOCK_REASON_UNSPECIFIED"
-    | "SAFETY"
-    | "OTHER"
-    | "BLOCKLIST"
-    | "PROHIBITED_CONTENT"
-  safetyRatings?: Array<GeminiSafetyRating>
+  promptFeedback?: Record<string, unknown>
 }
 
 export interface GeminiCandidate {
@@ -113,12 +90,7 @@ export interface GeminiCandidate {
     | "UNEXPECTED_TOOL_CALL"
     | "TOO_MANY_TOOL_CALLS"
   index: number
-  safetyRatings?: Array<GeminiSafetyRating>
-}
-
-export interface GeminiSafetyRating {
-  category: string
-  probability: string
+  safetyRatings?: Array<Record<string, unknown>>
 }
 
 export interface GeminiUsageMetadata {

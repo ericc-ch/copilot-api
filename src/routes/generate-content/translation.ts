@@ -1,3 +1,4 @@
+import { DebugLogger } from "~/lib/debug-logger"
 import {
   type ChatCompletionResponse,
   type ChatCompletionChunk,
@@ -29,9 +30,25 @@ function mapGeminiModelToCopilot(geminiModel: string): string {
   const modelMap: Record<string, string> = {
     "gemini-2.5-flash": "gemini-2.0-flash-001", // Map to supported Gemini model
     "gemini-2.0-flash": "gemini-2.0-flash-001", // Map to full model name
+    "gemini-2.5-flash-lite": "gemini-2.0-flash-001", // Map to full model name
   }
 
   return modelMap[geminiModel] || geminiModel // Return original if supported
+}
+
+function selectTools(
+  geminiTools?: Array<GeminiTool>,
+  contents?: Array<
+    | GeminiContent
+    | Array<{
+        functionResponse: { id?: string; name: string; response: unknown }
+      }>
+  >,
+): Array<Tool> | undefined {
+  return (
+    translateGeminiToolsToOpenAI(geminiTools)
+    || (contents ? synthesizeToolsFromContents(contents) : undefined)
+  )
 }
 
 // Request translation: Gemini -> OpenAI
@@ -40,20 +57,18 @@ export function translateGeminiToOpenAINonStream(
   payload: GeminiRequest,
   model: string,
 ): ChatCompletionsPayload {
-  const tools =
-    translateGeminiToolsToOpenAI(payload.tools)
-    || synthesizeToolsFromContents(payload.contents)
+  const tools = selectTools(payload.tools, payload.contents)
   const result = {
     model: mapGeminiModelToCopilot(model),
     messages: translateGeminiContentsToOpenAI(
       payload.contents,
       payload.systemInstruction,
     ),
-    max_tokens: payload.generationConfig?.maxOutputTokens || 4096,
-    stop: payload.generationConfig?.stopSequences,
+    max_tokens: (payload.generationConfig?.maxOutputTokens as number) || 4096,
+    stop: payload.generationConfig?.stopSequences as Array<string> | undefined,
     stream: false,
-    temperature: payload.generationConfig?.temperature,
-    top_p: payload.generationConfig?.topP,
+    temperature: payload.generationConfig?.temperature as number | undefined,
+    top_p: payload.generationConfig?.topP as number | undefined,
     tools,
     tool_choice:
       tools ? translateGeminiToolConfigToOpenAI(payload.toolConfig) : undefined,
@@ -66,20 +81,18 @@ export function translateGeminiToOpenAIStream(
   payload: GeminiRequest,
   model: string,
 ): ChatCompletionsPayload {
-  const tools =
-    translateGeminiToolsToOpenAI(payload.tools)
-    || synthesizeToolsFromContents(payload.contents)
+  const tools = selectTools(payload.tools, payload.contents)
   const result = {
     model: mapGeminiModelToCopilot(model),
     messages: translateGeminiContentsToOpenAI(
       payload.contents,
       payload.systemInstruction,
     ),
-    max_tokens: payload.generationConfig?.maxOutputTokens || 4096,
-    stop: payload.generationConfig?.stopSequences,
+    max_tokens: (payload.generationConfig?.maxOutputTokens as number) || 4096,
+    stop: payload.generationConfig?.stopSequences as Array<string> | undefined,
     stream: true,
-    temperature: payload.generationConfig?.temperature,
-    top_p: payload.generationConfig?.topP,
+    temperature: payload.generationConfig?.temperature as number | undefined,
+    top_p: payload.generationConfig?.topP as number | undefined,
     tools,
     tool_choice:
       tools ? translateGeminiToolConfigToOpenAI(payload.toolConfig) : undefined,
@@ -99,14 +112,24 @@ function processFunctionResponseArray(
   for (const responseItem of responseArray) {
     if ("functionResponse" in responseItem) {
       const functionName = responseItem.functionResponse.name
-      const toolCallId = pendingToolCalls.get(functionName)
-      if (toolCallId) {
+      // Find tool call ID by searching through the map
+      let matchedToolCallId: string | undefined
+      for (const [
+        toolCallId,
+        mappedFunctionName,
+      ] of pendingToolCalls.entries()) {
+        if (mappedFunctionName === functionName) {
+          matchedToolCallId = toolCallId
+          break
+        }
+      }
+      if (matchedToolCallId) {
         messages.push({
           role: "tool",
-          tool_call_id: toolCallId,
+          tool_call_id: matchedToolCallId,
           content: JSON.stringify(responseItem.functionResponse.response),
         })
-        pendingToolCalls.delete(functionName)
+        pendingToolCalls.delete(matchedToolCallId)
       }
     }
   }
@@ -138,14 +161,21 @@ function processFunctionResponses(
 ): void {
   for (const funcResponse of functionResponses) {
     const functionName = funcResponse.functionResponse.name
-    const toolCallId = pendingToolCalls.get(functionName)
-    if (toolCallId) {
+    // Find tool call ID by searching through the map
+    let matchedToolCallId: string | undefined
+    for (const [toolCallId, mappedFunctionName] of pendingToolCalls.entries()) {
+      if (mappedFunctionName === functionName) {
+        matchedToolCallId = toolCallId
+        break
+      }
+    }
+    if (matchedToolCallId) {
       messages.push({
         role: "tool",
-        tool_call_id: toolCallId,
+        tool_call_id: matchedToolCallId,
         content: JSON.stringify(funcResponse.functionResponse.response),
       })
-      pendingToolCalls.delete(functionName)
+      pendingToolCalls.delete(matchedToolCallId)
     }
   }
 }
@@ -163,7 +193,8 @@ function processFunctionCalls(options: {
   const toolCalls = functionCalls.map((call) => {
     const toolCallId = generateToolCallId(call.functionCall.name)
     // Remember this tool call for later matching with responses
-    pendingToolCalls.set(call.functionCall.name, toolCallId)
+    // Use tool_call_id as key to avoid duplicate function name overwrites
+    pendingToolCalls.set(toolCallId, call.functionCall.name)
 
     return {
       id: toolCallId,
@@ -195,6 +226,8 @@ function mergeConsecutiveSameRoleMessages(
       && lastMessage.role === message.role
       && !lastMessage.tool_calls
       && !message.tool_calls
+      && !(lastMessage as { tool_call_id?: string }).tool_call_id // Don't merge tool responses
+      && !(message as { tool_call_id?: string }).tool_call_id // Don't merge tool responses
     ) {
       // Merge with previous message of same role
       if (
@@ -245,7 +278,7 @@ function translateGeminiContentsToOpenAI(
   systemInstruction?: GeminiContent,
 ): Array<Message> {
   const messages: Array<Message> = []
-  const pendingToolCalls = new Map<string, string>() // function name -> tool_call_id
+  const pendingToolCalls = new Map<string, string>() // tool_call_id -> function_name
 
   // Add system instruction first if present
   if (systemInstruction) {
@@ -297,8 +330,11 @@ function translateGeminiContentsToOpenAI(
   // Post-process: Remove incomplete assistant messages from cancelled tool calls
   removeIncompleteAssistantMessages(messages)
 
+  // Post-process: Deduplicate tool responses (remove duplicate tool_call_ids)
+  const matchedMessages = ensureToolCallResponseMatch(messages)
+
   // Post-process: Merge consecutive messages with same role (based on LiteLLM research)
-  return mergeConsecutiveSameRoleMessages(messages)
+  return mergeConsecutiveSameRoleMessages(matchedMessages)
 }
 
 function synthesizeToolsFromContents(
@@ -343,10 +379,14 @@ function translateGeminiContentToOpenAI(
     if ("text" in part) {
       contentParts.push({ type: "text", text: part.text })
     } else if ("inlineData" in part) {
+      // Handle inline data for images - this is a legacy format
+      const partWithInlineData = part as {
+        inlineData: { mimeType: string; data: string }
+      }
       contentParts.push({
         type: "image_url",
         image_url: {
-          url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
+          url: `data:${partWithInlineData.inlineData.mimeType};base64,${partWithInlineData.inlineData.data}`,
         },
       })
     }
@@ -454,25 +494,62 @@ function translateGeminiToolConfigToOpenAI(
 
 // Response translation: OpenAI -> Gemini
 
+// Helper function to deduplicate tool responses - remove duplicate tool_call_ids
+// The problem was our logic was CREATING duplicates instead of preventing them
+
+function ensureToolCallResponseMatch(messages: Array<Message>): Array<Message> {
+  const result: Array<Message> = []
+  const seenToolCallIds = new Set<string>() // Track processed tool_call_ids to avoid duplicates
+
+  for (const message of messages) {
+    if (message.role === "tool" && message.tool_call_id) {
+      const toolCallId = message.tool_call_id
+
+      // Only keep the FIRST response for each tool_call_id (deduplicate)
+      if (!seenToolCallIds.has(toolCallId)) {
+        seenToolCallIds.add(toolCallId)
+        result.push(message)
+      }
+      // Skip any duplicate responses for the same tool_call_id
+    } else {
+      // Keep all non-tool messages as-is
+      result.push(message)
+    }
+  }
+
+  return result
+}
+
 export function translateOpenAIToGemini(
   response: ChatCompletionResponse,
 ): GeminiResponse {
-  const candidates: Array<GeminiCandidate> = response.choices.map(
-    (choice, index) => ({
+  const result = {
+    candidates: response.choices.map((choice, index) => ({
       content: translateOpenAIMessageToGeminiContent(choice.message),
       finishReason: mapOpenAIFinishReasonToGemini(choice.finish_reason),
       index,
-    }),
-  )
-
-  return {
-    candidates,
+    })),
     usageMetadata: {
       promptTokenCount: response.usage?.prompt_tokens || 0,
       candidatesTokenCount: response.usage?.completion_tokens || 0,
       totalTokenCount: response.usage?.total_tokens || 0,
     },
   }
+
+  // Debug: Log original GitHub Copilot response and translated Gemini response for comparison
+  if (process.env.DEBUG_GEMINI_REQUESTS === "true") {
+    DebugLogger.logResponseComparison(response, result, {
+      context: "Non-Stream Response Translation",
+      filePrefix: "debug-nonstream-comparison",
+    }).catch((error: unknown) => {
+      console.error(
+        "[DEBUG] Failed to log non-stream response comparison:",
+        error,
+      )
+    })
+  }
+
+  return result
 }
 
 function translateOpenAIMessageToGeminiContent(
@@ -507,6 +584,13 @@ function translateOpenAIMessageToGeminiContent(
   // Handle tool calls
   if (message.tool_calls) {
     for (const toolCall of message.tool_calls) {
+      // Debug: Log tool call arguments to verify what GitHub Copilot returns
+      if (process.env.DEBUG_GEMINI_REQUESTS === "true") {
+        console.log(
+          `[DEBUG] Tool call - name: ${toolCall.function.name}, arguments: "${toolCall.function.arguments}", type: ${typeof toolCall.function.arguments}, truthy: ${Boolean(toolCall.function.arguments)}`,
+        )
+      }
+
       parts.push({
         functionCall: {
           name: toolCall.function.name,
@@ -534,7 +618,94 @@ function generateToolCallId(functionName: string): string {
   return `call_${functionName}_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
 }
 
-// Helper function to process tool calls in streaming chunks
+// Global accumulator for streaming tool call arguments
+const streamingToolCallAccumulator = new Map<
+  number,
+  {
+    name: string
+    arguments: string
+    id?: string
+  }
+>()
+
+// Helper function to try parsing and creating a function call
+function tryCreateFunctionCall(
+  name: string,
+  argumentsStr: string,
+): GeminiPart | null {
+  try {
+    const args = JSON.parse(argumentsStr) as Record<string, unknown>
+    return {
+      functionCall: {
+        name,
+        args,
+      },
+    }
+  } catch {
+    return null
+  }
+}
+
+// Helper function to handle tool call with function name
+function handleToolCallWithName(toolCall: {
+  index: number
+  id?: string
+  function: {
+    name: string
+    arguments?: string
+  }
+}): GeminiPart | null {
+  const accumulatedArgs = toolCall.function.arguments || ""
+
+  streamingToolCallAccumulator.set(toolCall.index, {
+    name: toolCall.function.name,
+    arguments: accumulatedArgs,
+    id: toolCall.id,
+  })
+
+  // If we already have arguments, try to process immediately (for non-streaming models like Gemini)
+  if (accumulatedArgs) {
+    const functionCall = tryCreateFunctionCall(
+      toolCall.function.name,
+      accumulatedArgs,
+    )
+    if (functionCall) {
+      // Clear the accumulator for this index since we've successfully processed it
+      streamingToolCallAccumulator.delete(toolCall.index)
+      return functionCall
+    }
+  }
+
+  return null
+}
+
+// Helper function to handle tool call argument accumulation
+function handleToolCallAccumulation(toolCall: {
+  index: number
+  function?: {
+    arguments?: string
+  }
+}): GeminiPart | null {
+  const existingAccumulated = streamingToolCallAccumulator.get(toolCall.index)
+
+  if (existingAccumulated && toolCall.function?.arguments) {
+    existingAccumulated.arguments += toolCall.function.arguments
+
+    const functionCall = tryCreateFunctionCall(
+      existingAccumulated.name,
+      existingAccumulated.arguments,
+    )
+    if (functionCall) {
+      // Clear the accumulator for this index since we've successfully processed it
+      streamingToolCallAccumulator.delete(toolCall.index)
+      return functionCall
+    }
+  }
+
+  return null
+}
+
+// Helper function to process tool calls in streaming chunks with argument accumulation
 function processToolCalls(
   toolCalls: Array<{
     index: number
@@ -549,28 +720,34 @@ function processToolCalls(
   const parts: Array<GeminiPart> = []
 
   for (const toolCall of toolCalls) {
-    if (!toolCall.function?.name) {
+    // Debug: Log streaming tool call arguments to verify what GitHub Copilot returns
+    if (process.env.DEBUG_GEMINI_REQUESTS === "true") {
+      console.log(
+        `[DEBUG STREAM] Tool call - name: ${toolCall.function?.name}, arguments: "${toolCall.function?.arguments}", type: ${typeof toolCall.function?.arguments}, truthy: ${Boolean(toolCall.function?.arguments)}`,
+      )
+    }
+
+    // If this chunk has a function name, it's the start of a new tool call
+    if (toolCall.function?.name && toolCall.function.name.trim() !== "") {
+      const functionCall = handleToolCallWithName({
+        index: toolCall.index,
+        id: toolCall.id,
+        function: {
+          name: toolCall.function.name,
+          arguments: toolCall.function.arguments,
+        },
+      })
+      if (functionCall) {
+        parts.push(functionCall)
+      }
       continue
     }
 
-    let args: Record<string, unknown>
-    try {
-      args = JSON.parse(toolCall.function.arguments || "{}") as Record<
-        string,
-        unknown
-      >
-    } catch {
-      // In streaming, arguments might be incomplete JSON
-      // Skip this chunk and wait for complete arguments
-      continue
+    // If we have existing accumulated data and this chunk has arguments, append them
+    const functionCall = handleToolCallAccumulation(toolCall)
+    if (functionCall) {
+      parts.push(functionCall)
     }
-
-    parts.push({
-      functionCall: {
-        name: toolCall.function.name,
-        args,
-      },
-    })
   }
 
   return parts
@@ -711,6 +888,22 @@ export function translateOpenAIChunkToGemini(chunk: ChatCompletionChunk): {
     return null
   }
 
+  // Additional validation - if we only have function call parts with empty names,
+  // skip this chunk entirely to prevent invalid tool call responses
+  const hasOnlyEmptyToolCalls =
+    parts.length > 0
+    && parts.every((part) => {
+      if ("functionCall" in part) {
+        return !part.functionCall.name || part.functionCall.name.trim() === ""
+      }
+      return false
+    })
+    && parts.some((part) => "functionCall" in part)
+
+  if (hasOnlyEmptyToolCalls && !choice.finish_reason) {
+    return null
+  }
+
   const shouldInclude = shouldIncludeFinishReason(choice)
   const mappedFinishReason =
     shouldInclude ?
@@ -724,6 +917,16 @@ export function translateOpenAIChunkToGemini(chunk: ChatCompletionChunk): {
   )
   const response = buildGeminiResponse(candidate, shouldInclude, chunk)
 
+  // Debug: Log original GitHub Copilot chunk and translated Gemini chunk for comparison
+  if (process.env.DEBUG_GEMINI_REQUESTS === "true") {
+    DebugLogger.logResponseComparison(chunk, response, {
+      context: "Streaming Chunk Translation",
+      filePrefix: "debug-stream-comparison",
+    }).catch((error: unknown) => {
+      console.error("[DEBUG] Failed to log streaming chunk comparison:", error)
+    })
+  }
+
   return response
 }
 
@@ -733,9 +936,7 @@ export function translateGeminiCountTokensToOpenAI(
   request: GeminiCountTokensRequest,
   model: string,
 ): ChatCompletionsPayload {
-  const tools =
-    translateGeminiToolsToOpenAI(request.tools)
-    || synthesizeToolsFromContents(request.contents)
+  const tools = selectTools(request.tools, request.contents)
   return {
     model: mapGeminiModelToCopilot(model),
     messages: translateGeminiContentsToOpenAI(

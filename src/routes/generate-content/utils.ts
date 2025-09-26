@@ -1,50 +1,43 @@
 import { type GeminiCandidate } from "./types"
 
+const OpenAIFinish = {
+  stop: "stop",
+  length: "length",
+  content_filter: "content_filter",
+  tool_calls: "tool_calls",
+} as const
+
+const GeminiFinish = {
+  FINISH_REASON_UNSPECIFIED: "FINISH_REASON_UNSPECIFIED",
+  STOP: "STOP",
+  MAX_TOKENS: "MAX_TOKENS",
+  SAFETY: "SAFETY",
+  RECITATION: "RECITATION",
+  BLOCKLIST: "BLOCKLIST",
+  PROHIBITED_CONTENT: "PROHIBITED_CONTENT",
+  SPII: "SPII",
+  IMAGE_SAFETY: "IMAGE_SAFETY",
+  MALFORMED_FUNCTION_CALL: "MALFORMED_FUNCTION_CALL",
+} as const
+
 export function mapOpenAIFinishReasonToGemini(
   finishReason: string | null,
 ): GeminiCandidate["finishReason"] {
   switch (finishReason) {
-    case "stop": {
+    case OpenAIFinish.stop: {
       return "STOP"
     }
-    case "length": {
+    case OpenAIFinish.length: {
       return "MAX_TOKENS"
     }
-    case "content_filter": {
+    case OpenAIFinish.content_filter: {
       return "SAFETY"
     }
-    case "tool_calls": {
+    case OpenAIFinish.tool_calls: {
       return "STOP" // Gemini doesn't have a specific tool_calls finish reason, map to STOP
     }
     default: {
-      return "FINISH_REASON_UNSPECIFIED"
-    }
-  }
-}
-
-// Add the reverse mapping - Gemini → OpenAI (based on LiteLLM research)
-export function mapGeminiFinishReasonToOpenAI(
-  finishReason: string | undefined,
-): "stop" | "length" | "content_filter" | "tool_calls" {
-  switch (finishReason) {
-    case "STOP":
-    case "FINISH_REASON_UNSPECIFIED":
-    case "MALFORMED_FUNCTION_CALL": {
-      return "stop"
-    }
-    case "MAX_TOKENS": {
-      return "length"
-    }
-    case "SAFETY":
-    case "RECITATION":
-    case "BLOCKLIST":
-    case "PROHIBITED_CONTENT":
-    case "SPII":
-    case "IMAGE_SAFETY": {
-      return "content_filter"
-    }
-    default: {
-      return "stop"
+      return GeminiFinish.FINISH_REASON_UNSPECIFIED
     }
   }
 }

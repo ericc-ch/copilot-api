@@ -4,6 +4,7 @@ import type { SSEStreamingApi } from "hono/streaming"
 import { streamSSE } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
+import { DebugLogger } from "~/lib/debug-logger"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
 import { getTokenCount } from "~/lib/tokenizer"
@@ -295,6 +296,14 @@ export async function handleGeminiStreamGeneration(c: Context) {
 
   const openAIPayload = translateGeminiToOpenAIStream(geminiPayload, model)
 
+  // Log request for debugging (async, non-blocking) - only if debug logging is enabled
+  if (process.env.DEBUG_GEMINI_REQUESTS === "true") {
+    DebugLogger.logGeminiRequest(geminiPayload, openAIPayload).catch(
+      (error: unknown) => {
+        console.error("[DEBUG] Failed to log request:", error)
+      },
+    )
+  }
   if (state.manualApprove) {
     await awaitApproval()
   }
