@@ -27,7 +27,10 @@ test("falls back to streaming when downstream returns non-stream JSON", async ()
     }),
   }))
 
-  const { server } = (await import("~/server")) as { server: TestServer }
+  await createMockRateLimit()
+  const { server } = (await import("~/server?fallback-non-streaming")) as {
+    server: TestServer
+  }
   const res = await server.request(
     "/v1beta/models/gemini-pro:streamGenerateContent",
     {
