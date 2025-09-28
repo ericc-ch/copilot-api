@@ -161,6 +161,7 @@ The following command line options are available for the `start` command:
 | --wait         | Wait instead of error when rate limit is hit                                  | false      | -w    |
 | --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand) | none       | -g    |
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
+| --claude-code-env  | Generate Claude Code Environment variables             | true      | none    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
 
 ### Auth Command Options

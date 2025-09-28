@@ -23,6 +23,7 @@ interface RunServerOptions {
   githubToken?: string
   claudeCode: boolean
   showToken: boolean
+  claudeCodeEnv?: boolean
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -60,7 +61,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   const serverUrl = `http://localhost:${options.port}`
 
-  if (options.claudeCode) {
+  if (options.claudeCode && options.claudeCodeEnv) {
     invariant(state.models, "Models should be loaded by now")
 
     const selectedModel = await consola.prompt(
@@ -169,6 +170,11 @@ export const start = defineCommand({
       default: false,
       description: "Show GitHub and Copilot tokens on fetch and refresh",
     },
+    "claude-code-env": {
+      type: "boolean",
+      default: true,
+      description: "Generate Claude Code Environment variables",
+    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
@@ -186,6 +192,7 @@ export const start = defineCommand({
       githubToken: args["github-token"],
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
+      claudeCodeEnv: args["claude-code-env"],
     })
   },
 })
