@@ -81,7 +81,9 @@ describe("translateResponsesResultToAnthropic", () => {
         {
           id: "reason_1",
           type: "reasoning",
-          reasoning: [{ type: "text", text: "Thinking about the task." }],
+          summary: [{ type: "text", text: "Thinking about the task." }],
+          status: "completed",
+          encrypted_content: "encrypted_reasoning_content",
         },
         {
           id: "call_1",

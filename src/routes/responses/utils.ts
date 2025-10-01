@@ -31,14 +31,10 @@ const getPayloadItems = (
 ): Array<ResponseInputItem> => {
   const result: Array<ResponseInputItem> = []
 
-  const { input, instructions } = payload
+  const { input } = payload
 
   if (Array.isArray(input)) {
     result.push(...input)
-  }
-
-  if (Array.isArray(instructions)) {
-    result.push(...instructions)
   }
 
   return result

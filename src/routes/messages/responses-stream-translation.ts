@@ -13,6 +13,7 @@ export interface ResponsesStreamState {
   currentResponseId?: string
   currentModel?: string
   initialInputTokens?: number
+  initialInputCachedTokens?: number
   functionCallStateByOutputIndex: Map<number, FunctionCallStreamState>
   functionCallOutputIndexByItemId: Map<string, number>
 }
@@ -49,18 +50,28 @@ export const translateResponsesStreamEvent = (
       return handleResponseCreated(rawEvent, state)
     }
 
-    case "response.reasoning_summary_text.delta":
+    case "response.reasoning_summary_text.delta": {
+      return handleReasoningSummaryTextDelta(rawEvent, state)
+    }
+
     case "response.output_text.delta": {
       return handleOutputTextDelta(rawEvent, state)
     }
 
-    case "response.reasoning_summary_part.done":
+    case "response.reasoning_summary_part.done": {
+      return handleReasoningSummaryPartDone(rawEvent, state)
+    }
+
     case "response.output_text.done": {
       return handleOutputTextDone(rawEvent, state)
     }
 
     case "response.output_item.added": {
       return handleOutputItemAdded(rawEvent, state)
+    }
+
+    case "response.output_item.done": {
+      return handleOutputItemDone(rawEvent, state)
     }
 
     case "response.function_call_arguments.delta": {
@@ -139,6 +150,46 @@ const handleOutputItemAdded = (
     })
     state.blockHasDelta.add(blockIndex)
   }
+
+  return events
+}
+
+const handleOutputItemDone = (
+  rawEvent: Record<string, unknown>,
+  state: ResponsesStreamState,
+): Array<AnthropicStreamEventData> => {
+  const events = ensureMessageStart(state)
+
+  const item = isRecord(rawEvent.item) ? rawEvent.item : undefined
+  if (!item) {
+    return events
+  }
+
+  const itemType = typeof item.type === "string" ? item.type : undefined
+  if (itemType !== "reasoning") {
+    return events
+  }
+
+  const outputIndex = toNumber(rawEvent.output_index)
+
+  const blockIndex = openThinkingBlockIfNeeded(state, outputIndex, events)
+
+  const signature =
+    typeof item.encrypted_content === "string" ? item.encrypted_content : ""
+
+  if (signature) {
+    events.push({
+      type: "content_block_delta",
+      index: blockIndex,
+      delta: {
+        type: "signature_delta",
+        signature,
+      },
+    })
+    state.blockHasDelta.add(blockIndex)
+  }
+
+  closeBlockIfOpen(state, blockIndex, events)
 
   return events
 }
@@ -253,6 +304,60 @@ const handleOutputTextDelta = (
     },
   })
   state.blockHasDelta.add(blockIndex)
+
+  return events
+}
+
+const handleReasoningSummaryTextDelta = (
+  rawEvent: Record<string, unknown>,
+  state: ResponsesStreamState,
+): Array<AnthropicStreamEventData> => {
+  const events = ensureMessageStart(state)
+
+  const outputIndex = toNumber(rawEvent.output_index)
+  const deltaText = typeof rawEvent.delta === "string" ? rawEvent.delta : ""
+
+  if (!deltaText) {
+    return events
+  }
+
+  const blockIndex = openThinkingBlockIfNeeded(state, outputIndex, events)
+
+  events.push({
+    type: "content_block_delta",
+    index: blockIndex,
+    delta: {
+      type: "thinking_delta",
+      thinking: deltaText,
+    },
+  })
+  state.blockHasDelta.add(blockIndex)
+
+  return events
+}
+
+const handleReasoningSummaryPartDone = (
+  rawEvent: Record<string, unknown>,
+  state: ResponsesStreamState,
+): Array<AnthropicStreamEventData> => {
+  const events = ensureMessageStart(state)
+
+  const outputIndex = toNumber(rawEvent.output_index)
+  const part = isRecord(rawEvent.part) ? rawEvent.part : undefined
+  const text = part && typeof part.text === "string" ? part.text : ""
+
+  const blockIndex = openThinkingBlockIfNeeded(state, outputIndex, events)
+
+  if (text && !state.blockHasDelta.has(blockIndex)) {
+    events.push({
+      type: "content_block_delta",
+      index: blockIndex,
+      delta: {
+        type: "thinking_delta",
+        thinking: text,
+      },
+    })
+  }
 
   return events
 }
@@ -372,11 +477,10 @@ const ensureMessageStart = (
   const id = response?.id ?? state.currentResponseId ?? "response"
   const model = response?.model ?? state.currentModel ?? ""
 
-  const inputTokens =
-    response?.usage?.input_tokens ?? state.initialInputTokens ?? 0
-
   state.messageStartSent = true
 
+  const inputTokens =
+    (state.initialInputTokens ?? 0) - (state.initialInputCachedTokens ?? 0)
   return [
     {
       type: "message_start",
@@ -391,6 +495,9 @@ const ensureMessageStart = (
         usage: {
           input_tokens: inputTokens,
           output_tokens: 0,
+          ...(state.initialInputCachedTokens !== undefined && {
+            cache_creation_input_tokens: state.initialInputCachedTokens,
+          }),
         },
       },
     },
@@ -422,6 +529,36 @@ const openTextBlockIfNeeded = (
       content_block: {
         type: "text",
         text: "",
+      },
+    })
+    state.openBlocks.add(blockIndex)
+  }
+
+  return blockIndex
+}
+
+const openThinkingBlockIfNeeded = (
+  state: ResponsesStreamState,
+  outputIndex: number,
+  events: Array<AnthropicStreamEventData>,
+): number => {
+  const contentIndex = 0
+  const key = getBlockKey(outputIndex, contentIndex)
+  let blockIndex = state.blockIndexByKey.get(key)
+
+  if (blockIndex === undefined) {
+    blockIndex = state.nextContentBlockIndex
+    state.nextContentBlockIndex += 1
+    state.blockIndexByKey.set(key, blockIndex)
+  }
+
+  if (!state.openBlocks.has(blockIndex)) {
+    events.push({
+      type: "content_block_start",
+      index: blockIndex,
+      content_block: {
+        type: "thinking",
+        thinking: "",
       },
     })
     state.openBlocks.add(blockIndex)
@@ -463,6 +600,8 @@ const cacheResponseMetadata = (
   state.currentResponseId = response.id
   state.currentModel = response.model
   state.initialInputTokens = response.usage?.input_tokens ?? 0
+  state.initialInputCachedTokens =
+    response.usage?.input_tokens_details?.cached_tokens
 }
 
 const buildErrorEvent = (message: string): AnthropicStreamEventData => ({

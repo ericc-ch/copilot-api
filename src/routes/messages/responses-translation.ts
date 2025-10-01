@@ -6,6 +6,7 @@ import {
   type ResponseInputImage,
   type ResponseInputItem,
   type ResponseInputMessage,
+  type ResponseInputReasoning,
   type ResponseInputText,
   type ResponsesResult,
   type ResponseOutputContentBlock,
@@ -27,6 +28,7 @@ import {
   type AnthropicMessage,
   type AnthropicMessagesPayload,
   type AnthropicTextBlock,
+  type AnthropicThinkingBlock,
   type AnthropicTool,
   type AnthropicToolResultBlock,
   type AnthropicToolUseBlock,
@@ -137,6 +139,12 @@ const translateAssistantMessage = (
       continue
     }
 
+    if (block.type === "thinking") {
+      flushPendingContent("assistant", pendingContent, items)
+      items.push(createReasoningContent(block))
+      continue
+    }
+
     const converted = translateAssistantContentBlock(block)
     if (converted) {
       pendingContent.push(converted)
@@ -158,9 +166,6 @@ const translateUserContentBlock = (
     case "image": {
       return createImageContent(block)
     }
-    case "tool_result": {
-      return undefined
-    }
     default: {
       return undefined
     }
@@ -173,12 +178,6 @@ const translateAssistantContentBlock = (
   switch (block.type) {
     case "text": {
       return createOutPutTextContent(block.text)
-    }
-    case "thinking": {
-      return createOutPutTextContent(block.thinking)
-    }
-    case "tool_use": {
-      return undefined
     }
     default: {
       return undefined
@@ -228,6 +227,19 @@ const createImageContent = (
 ): ResponseInputImage => ({
   type: "input_image",
   image_url: `data:${block.source.media_type};base64,${block.source.data}`,
+})
+
+const createReasoningContent = (
+  block: AnthropicThinkingBlock,
+): ResponseInputReasoning => ({
+  type: "reasoning",
+  summary: [
+    {
+      type: "summary_text",
+      text: block.thinking,
+    },
+  ],
+  encrypted_content: block.signature,
 })
 
 const createFunctionToolCall = (
@@ -376,7 +388,11 @@ const mapOutputToAnthropicContent = (
       case "reasoning": {
         const thinkingText = extractReasoningText(item)
         if (thinkingText.length > 0) {
-          contentBlocks.push({ type: "thinking", thinking: thinkingText })
+          contentBlocks.push({
+            type: "thinking",
+            thinking: thinkingText,
+            signature: item.encrypted_content ?? "",
+          })
         }
         break
       }
@@ -456,30 +472,10 @@ const extractReasoningText = (item: ResponseOutputReasoning): string => {
         segments.push(block.text)
         continue
       }
-
-      if (typeof block.thinking === "string") {
-        segments.push(block.thinking)
-        continue
-      }
-
-      const reasoningValue = (block as Record<string, unknown>).reasoning
-      if (typeof reasoningValue === "string") {
-        segments.push(reasoningValue)
-      }
     }
   }
 
-  collectFromBlocks(item.reasoning)
   collectFromBlocks(item.summary)
-
-  if (typeof item.thinking === "string") {
-    segments.push(item.thinking)
-  }
-
-  const textValue = (item as Record<string, unknown>).text
-  if (typeof textValue === "string") {
-    segments.push(textValue)
-  }
 
   return segments.join("").trim()
 }
@@ -571,12 +567,17 @@ const mapResponsesStopReason = (
 const mapResponsesUsage = (
   response: ResponsesResult,
 ): AnthropicResponse["usage"] => {
-  const promptTokens = response.usage?.input_tokens ?? 0
-  const completionTokens = response.usage?.output_tokens ?? 0
+  const inputTokens = response.usage?.input_tokens ?? 0
+  const outputTokens = response.usage?.output_tokens ?? 0
+  const inputCachedTokens = response.usage?.input_tokens_details?.cached_tokens
 
   return {
-    input_tokens: promptTokens,
-    output_tokens: completionTokens,
+    input_tokens: inputTokens - (inputCachedTokens ?? 0),
+    output_tokens: outputTokens,
+    ...(response.usage?.input_tokens_details?.cached_tokens !== undefined && {
+      cache_read_input_tokens:
+        response.usage.input_tokens_details.cached_tokens,
+    }),
   }
 }
 

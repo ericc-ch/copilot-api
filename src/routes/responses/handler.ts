@@ -52,13 +52,29 @@ export const handleResponses = async (c: Context) => {
   if (isStreamingRequested(payload) && isAsyncIterable(response)) {
     consola.debug("Forwarding native Responses stream")
     return streamSSE(c, async (stream) => {
-      for await (const chunk of response) {
-        consola.debug("Responses stream chunk:", JSON.stringify(chunk))
-        await stream.writeSSE({
-          id: (chunk as { id?: string }).id,
-          event: (chunk as { event?: string }).event,
-          data: (chunk as { data?: string }).data ?? "",
-        })
+      const pingInterval = setInterval(async () => {
+        try {
+          await stream.writeSSE({
+            event: "ping",
+            data: JSON.stringify({ timestamp: Date.now() }),
+          })
+        } catch (error) {
+          consola.warn("Failed to send ping:", error)
+          clearInterval(pingInterval)
+        }
+      }, 3000)
+
+      try {
+        for await (const chunk of response) {
+          consola.debug("Responses stream chunk:", JSON.stringify(chunk))
+          await stream.writeSSE({
+            id: (chunk as { id?: string }).id,
+            event: (chunk as { event?: string }).event,
+            data: (chunk as { data?: string }).data ?? "",
+          })
+        }
+      } finally {
+        clearInterval(pingInterval)
       }
     })
   }

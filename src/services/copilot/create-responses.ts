@@ -7,13 +7,13 @@ import { state } from "~/lib/state"
 
 export interface ResponsesPayload {
   model: string
+  instructions?: string | null
   input?: string | Array<ResponseInputItem>
-  instructions?: string | Array<ResponseInputItem> | null
+  tools?: Array<Record<string, unknown>> | null
+  tool_choice?: unknown
   temperature?: number | null
   top_p?: number | null
   max_output_tokens?: number | null
-  tools?: Array<Record<string, unknown>> | null
-  tool_choice?: unknown
   metadata?: Record<string, unknown> | null
   stream?: boolean | null
   response_format?: Record<string, unknown> | null
@@ -48,10 +48,20 @@ export interface ResponseFunctionCallOutputItem {
   status?: "in_progress" | "completed" | "incomplete"
 }
 
+export interface ResponseInputReasoning {
+  type: "reasoning"
+  summary: Array<{
+    type: "summary_text"
+    text: string
+  }>
+  encrypted_content: string
+}
+
 export type ResponseInputItem =
   | ResponseInputMessage
   | ResponseFunctionToolCallItem
   | ResponseFunctionCallOutputItem
+  | ResponseInputReasoning
   | Record<string, unknown>
 
 export type ResponseInputContent =
@@ -107,17 +117,15 @@ export interface ResponseOutputMessage {
 export interface ResponseOutputReasoning {
   id: string
   type: "reasoning"
-  reasoning?: Array<ResponseReasoningBlock>
   summary?: Array<ResponseReasoningBlock>
-  thinking?: string
+  encrypted_content?: string
+  status: "completed" | "in_progress" | "incomplete"
   [key: string]: unknown
 }
 
 export interface ResponseReasoningBlock {
   type: string
   text?: string
-  thinking?: string
-  [key: string]: unknown
 }
 
 export interface ResponseOutputFunctionCall {
