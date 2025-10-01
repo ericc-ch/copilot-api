@@ -23,7 +23,6 @@ interface RunServerOptions {
   githubToken?: string
   claudeCode: boolean
   showToken: boolean
-  claudeCodeEnv?: boolean
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -61,7 +60,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   const serverUrl = `http://localhost:${options.port}`
 
-  if (options.claudeCode && options.claudeCodeEnv) {
+  if (options.claudeCode) {
     invariant(state.models, "Models should be loaded by now")
 
     const selectedModel = await consola.prompt(
@@ -85,7 +84,11 @@ export async function runServer(options: RunServerOptions): Promise<void> {
         ANTHROPIC_BASE_URL: serverUrl,
         ANTHROPIC_AUTH_TOKEN: "dummy",
         ANTHROPIC_MODEL: selectedModel,
+        ANTHROPIC_DEFAULT_SONNET_MODEL: selectedModel,
         ANTHROPIC_SMALL_FAST_MODEL: selectedSmallModel,
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: selectedSmallModel,
+        DISABLE_NON_ESSENTIAL_MODEL_CALLS: "1",
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       },
       "claude",
     )
@@ -170,11 +173,6 @@ export const start = defineCommand({
       default: false,
       description: "Show GitHub and Copilot tokens on fetch and refresh",
     },
-    "claude-code-env": {
-      type: "boolean",
-      default: true,
-      description: "Generate Claude Code Environment variables",
-    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
@@ -192,7 +190,6 @@ export const start = defineCommand({
       githubToken: args["github-token"],
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
-      claudeCodeEnv: args["claude-code-env"],
     })
   },
 })
