@@ -151,8 +151,7 @@ export function synthesizeToolsFromContents(
 }
 
 /**
- * 工具调用状态管理器
- * 用于流式响应中工具调用参数的增量累积
+ * Tool call state manager for incremental parameter accumulation in streaming responses
  */
 export class ToolCallAccumulator {
   private accumulator = new Map<
@@ -165,7 +164,7 @@ export class ToolCallAccumulator {
   >()
 
   /**
-   * 处理带有函数名的工具调用（新工具调用的开始）
+   * Handle tool call with function name (start of new tool call)
    */
   handleToolCallWithName(toolCall: {
     index: number
@@ -200,7 +199,7 @@ export class ToolCallAccumulator {
   }
 
   /**
-   * 处理工具调用参数累积（追加参数片段）
+   * Handle tool call parameter accumulation (append argument fragments)
    */
   handleToolCallAccumulation(toolCall: {
     index: number
@@ -228,7 +227,7 @@ export class ToolCallAccumulator {
   }
 
   /**
-   * 清理所有累积状态（用于流结束或错误重置）
+   * Clear all accumulated state (for stream end or error reset)
    */
   clear(): void {
     this.accumulator.clear()
@@ -236,8 +235,8 @@ export class ToolCallAccumulator {
 }
 
 /**
- * 处理工具调用数组，生成 Gemini 格式的部分
- * 支持完整参数和分片参数两种模式
+ * Process tool calls array and generate Gemini format parts
+ * Supports both complete parameters and fragmented parameters modes
  */
 export function processToolCalls(
   toolCalls: Array<{
