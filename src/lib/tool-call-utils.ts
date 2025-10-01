@@ -4,7 +4,7 @@ import type {
   GeminiContent,
   GeminiPart,
 } from "~/routes/generate-content/types"
-import type { Tool, Message } from "~/services/copilot/create-chat-completions"
+import type { Tool } from "~/services/copilot/create-chat-completions"
 
 // Tool declaration generation - moved from translation.ts
 export function translateGeminiToolsToOpenAI(
@@ -97,32 +97,6 @@ export function translateGeminiToolConfigToOpenAI(
   }
 }
 
-// Tool response deduplication - moved from translation.ts
-export function ensureToolCallResponseMatch(
-  messages: Array<Message>,
-): Array<Message> {
-  const result: Array<Message> = []
-  const seenToolCallIds = new Set<string>() // Track processed tool_call_ids to avoid duplicates
-
-  for (const message of messages) {
-    if (message.role === "tool" && message.tool_call_id) {
-      const toolCallId = message.tool_call_id
-
-      // Only keep the FIRST response for each tool_call_id (deduplicate)
-      if (!seenToolCallIds.has(toolCallId)) {
-        seenToolCallIds.add(toolCallId)
-        result.push(message)
-      }
-      // Skip any duplicate responses for the same tool_call_id
-    } else {
-      // Keep all non-tool messages as-is
-      result.push(message)
-    }
-  }
-
-  return result
-}
-
 // Utility function to generate unique tool call IDs - moved from translation.ts
 // Generate IDs within 40 character limit (API constraint)
 export function generateToolCallId(_functionName: string): string {
@@ -132,6 +106,8 @@ export function generateToolCallId(_functionName: string): string {
 }
 
 // Helper function to try parsing and creating a function call - moved from translation.ts
+// NOTE: Used internally by ToolCallAccumulator.handleToolCallWithName() and handleToolCallAccumulation()
+// knip may report this as unused, but it's called within this module's class methods
 export function tryCreateFunctionCall(
   name: string,
   argumentsStr: string,
