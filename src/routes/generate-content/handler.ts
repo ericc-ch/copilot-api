@@ -23,9 +23,10 @@ function extractModelFromUrl(url: string): string {
   return match[1]
 }
 
+import { ToolCallAccumulator } from "~/lib/tool-call-utils"
+
 import {
-  translateGeminiToOpenAINonStream,
-  translateGeminiToOpenAIStream,
+  translateGeminiToOpenAI,
   translateOpenAIToGemini,
   translateGeminiCountTokensToOpenAI,
   translateTokenCountToGemini,
@@ -38,8 +39,11 @@ import {
   type GeminiResponse,
 } from "./types"
 
-// Standard generation endpoint
-export async function handleGeminiGeneration(c: Context) {
+// Unified generation handler following Claude's two-branch pattern
+export async function handleGeminiGeneration(
+  c: Context,
+  stream: boolean = false,
+) {
   const model = extractModelFromUrl(c.req.url)
 
   if (!model) {
@@ -49,8 +53,16 @@ export async function handleGeminiGeneration(c: Context) {
   await checkRateLimit(state)
 
   const geminiPayload = await c.req.json<GeminiRequest>()
+  const openAIPayload = translateGeminiToOpenAI(geminiPayload, model, stream)
 
-  const openAIPayload = translateGeminiToOpenAINonStream(geminiPayload, model)
+  // Log request for debugging (async, non-blocking) - only if debug logging is enabled
+  if (process.env.DEBUG_GEMINI_REQUESTS === "true") {
+    DebugLogger.logGeminiRequest(geminiPayload, openAIPayload).catch(
+      (error: unknown) => {
+        console.error("[DEBUG] Failed to log request:", error)
+      },
+    )
+  }
 
   if (state.manualApprove) {
     await awaitApproval()
@@ -61,11 +73,17 @@ export async function handleGeminiGeneration(c: Context) {
   if (isNonStreaming(response)) {
     const geminiResponse = translateOpenAIToGemini(response)
 
+    if (stream) {
+      return handleNonStreamingToStreaming(c, geminiResponse)
+    }
     return c.json(geminiResponse)
   }
 
-  // This shouldn't happen for non-streaming endpoint
-  throw new Error("Unexpected streaming response for non-streaming endpoint")
+  if (!stream) {
+    throw new Error("Unexpected streaming response for non-streaming endpoint")
+  }
+
+  return handleStreamingResponse(c, response)
 }
 
 // Helper function to handle non-streaming response conversion
@@ -156,29 +174,36 @@ async function sendFallbackResponse(
   await stream.writeSSE({ data: JSON.stringify(streamResponse) })
 }
 
-// Accumulative JSON parser for handling incomplete chunks (based on LiteLLM research)
-class StreamingJSONParser {
-  private accumulatedData = ""
-  private parseMode: "direct" | "accumulated" = "direct"
+// Simplified Gemini streaming state (inspired by Claude AnthropicStreamState)
+interface GeminiStreamState {
+  jsonAccumulator: string
+  parseMode: "direct" | "accumulated"
+}
+
+// Minimal state machine for JSON parsing only
+class GeminiStreamParser {
+  private state: GeminiStreamState = {
+    jsonAccumulator: "",
+    parseMode: "direct",
+  }
 
   parseChunk(rawData: string): unknown {
-    if (this.parseMode === "direct") {
+    if (this.state.parseMode === "direct") {
       try {
         return JSON.parse(rawData)
       } catch {
-        // Switch to accumulated mode on first failure (LiteLLM pattern)
-        this.parseMode = "accumulated"
-        this.accumulatedData = rawData
+        // Switch to accumulated mode on first failure
+        this.state.parseMode = "accumulated"
+        this.state.jsonAccumulator = rawData
         return null
       }
     } else {
       // Accumulated mode - keep building until valid JSON
-      this.accumulatedData += rawData
+      this.state.jsonAccumulator += rawData
       try {
-        const result = JSON.parse(this.accumulatedData) as unknown
+        const result = JSON.parse(this.state.jsonAccumulator) as unknown
         // Success - reset for next chunk
-        this.accumulatedData = ""
-        this.parseMode = "direct" // Can switch back to direct mode
+        this.resetAccumulator()
         return result
       } catch {
         // Continue accumulating
@@ -186,55 +211,10 @@ class StreamingJSONParser {
       }
     }
   }
-}
 
-// Global parser instance for the stream
-// let streamParser = new StreamingJSONParser()
-
-// Helper function to process chunk and write to stream
-async function processAndWriteChunk(params: {
-  rawEvent: { data?: string }
-  stream: SSEStreamingApi
-  lastWritePromise: Promise<void>
-  streamParser: StreamingJSONParser
-}): Promise<{ newWritePromise: Promise<void>; hasFinishReason: boolean }> {
-  const { rawEvent, stream, lastWritePromise, streamParser } = params
-
-  if (!rawEvent.data) {
-    return { newWritePromise: lastWritePromise, hasFinishReason: false }
-  }
-
-  try {
-    const chunk = streamParser.parseChunk(rawEvent.data)
-
-    // If parser returns null, we're still accumulating
-    if (!chunk) {
-      return { newWritePromise: lastWritePromise, hasFinishReason: false }
-    }
-
-    const geminiChunk = translateOpenAIChunkToGemini(
-      chunk as ChatCompletionChunk,
-    )
-
-    if (geminiChunk) {
-      // Check if this chunk contains a finish reason
-      const chunkHasFinishReason = geminiChunk.candidates.some(
-        (c) => c.finishReason && c.finishReason !== "FINISH_REASON_UNSPECIFIED",
-      )
-
-      // Wait for previous write to complete before writing new chunk
-      await lastWritePromise
-      const newWritePromise = stream.writeSSE({
-        data: JSON.stringify(geminiChunk),
-      })
-
-      return { newWritePromise, hasFinishReason: chunkHasFinishReason }
-    } else {
-      return { newWritePromise: lastWritePromise, hasFinishReason: false }
-    }
-  } catch (parseError) {
-    console.error("[GEMINI_STREAM] Error parsing chunk", parseError)
-    return { newWritePromise: lastWritePromise, hasFinishReason: false }
+  private resetAccumulator(): void {
+    this.state.jsonAccumulator = ""
+    this.state.parseMode = "direct"
   }
 }
 
@@ -245,7 +225,9 @@ function handleStreamingResponse(
 ) {
   return streamSSE(c, async (stream) => {
     // Create a parser instance for this stream (each request gets its own parser)
-    const streamParser = new StreamingJSONParser()
+    const streamParser = new GeminiStreamParser()
+    // Create a tool call accumulator for this stream
+    const toolCallAccumulator = new ToolCallAccumulator()
     let lastWritePromise: Promise<void> = Promise.resolve()
 
     try {
@@ -254,13 +236,32 @@ function handleStreamingResponse(
           break
         }
 
-        const result = await processAndWriteChunk({
-          rawEvent,
-          stream,
-          lastWritePromise,
-          streamParser,
-        })
-        lastWritePromise = result.newWritePromise
+        // Inline processing without extra wrapper
+        if (!rawEvent.data) {
+          continue
+        }
+
+        try {
+          const chunk = streamParser.parseChunk(rawEvent.data)
+          if (!chunk) {
+            continue
+          }
+
+          const geminiChunk = translateOpenAIChunkToGemini(
+            chunk as ChatCompletionChunk,
+            toolCallAccumulator,
+          )
+          if (geminiChunk) {
+            // Wait for previous write to complete before writing new chunk
+            await lastWritePromise
+            lastWritePromise = stream.writeSSE({
+              data: JSON.stringify(geminiChunk),
+            })
+          }
+        } catch (parseError) {
+          console.error("[GEMINI_STREAM] Error parsing chunk", parseError)
+          continue
+        }
       }
 
       // Wait for all writes to complete before closing
@@ -282,41 +283,9 @@ function handleStreamingResponse(
   })
 }
 
-// Streaming generation endpoint
-export async function handleGeminiStreamGeneration(c: Context) {
-  const model = extractModelFromUrl(c.req.url)
-
-  if (!model) {
-    throw new Error("Model name is required in URL path")
-  }
-
-  await checkRateLimit(state)
-
-  const geminiPayload = await c.req.json<GeminiRequest>()
-
-  const openAIPayload = translateGeminiToOpenAIStream(geminiPayload, model)
-
-  // Log request for debugging (async, non-blocking) - only if debug logging is enabled
-  if (process.env.DEBUG_GEMINI_REQUESTS === "true") {
-    DebugLogger.logGeminiRequest(geminiPayload, openAIPayload).catch(
-      (error: unknown) => {
-        console.error("[DEBUG] Failed to log request:", error)
-      },
-    )
-  }
-  if (state.manualApprove) {
-    await awaitApproval()
-  }
-
-  const response = await createChatCompletions(openAIPayload)
-
-  if (isNonStreaming(response)) {
-    const geminiResponse = translateOpenAIToGemini(response)
-
-    return handleNonStreamingToStreaming(c, geminiResponse)
-  }
-
-  return handleStreamingResponse(c, response)
+// Create convenience wrapper for streaming generation
+export function handleGeminiStreamGeneration(c: Context) {
+  return handleGeminiGeneration(c, true)
 }
 
 // Token counting endpoint
