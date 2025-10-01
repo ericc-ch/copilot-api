@@ -27,7 +27,7 @@ test("processes toolConfig AUTO/ANY/NONE mapping end-to-end", async () => {
     },
   }))
 
-  // toolConfig 需要有 tools 才会被处理，所以添加 tools
+  // toolConfig requires tools to be processed, so add tools to request
   const baseRequest = {
     tools: [
       {
@@ -264,7 +264,7 @@ test("handles empty contents gracefully", async () => {
     contents: [],
   })
 
-  // 空 contents 会导致翻译过程中出错，返回 500
+  // Empty contents cause translation error, expect 500 status
   expect(res.status).toBe(500)
 })
 

@@ -35,6 +35,7 @@ export interface CapturedPayload extends Record<string, unknown> {
       type: string
       function: { name: string; arguments: string }
     }>
+    tool_call_id?: string
   }>
   tools?: Array<{
     type: string
