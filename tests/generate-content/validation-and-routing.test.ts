@@ -222,7 +222,7 @@ test("handles malformed JSON in request body", async () => {
     },
   )
 
-  // JSON 解析错误会返回 500
+  // JSON parsing errors will return 500
   expect(res.status).toBe(500)
 })
 
