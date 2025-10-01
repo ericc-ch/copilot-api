@@ -56,6 +56,7 @@ export interface AnthropicToolUseBlock {
 export interface AnthropicThinkingBlock {
   type: "thinking"
   thinking: string
+  signature: string
 }
 
 export type AnthropicUserContentBlock =
@@ -101,7 +102,7 @@ export interface AnthropicResponse {
     | "refusal"
     | null
   stop_sequence: string | null
-  usage: {
+  usage?: {
     input_tokens: number
     output_tokens: number
     cache_creation_input_tokens?: number

@@ -184,11 +184,12 @@ The server exposes several endpoints to interact with the Copilot API. It provid
 
 These endpoints mimic the OpenAI API structure.
 
-| Endpoint                    | Method | Description                                               |
-| --------------------------- | ------ | --------------------------------------------------------- |
-| `POST /v1/chat/completions` | `POST` | Creates a model response for the given chat conversation. |
-| `GET /v1/models`            | `GET`  | Lists the currently available models.                     |
-| `POST /v1/embeddings`       | `POST` | Creates an embedding vector representing the input text.  |
+| Endpoint                    | Method | Description                                                      |
+| --------------------------- | ------ | ---------------------------------------------------------------- |
+| `POST /v1/responses`        | `POST` | Most advanced interface for generating model responses.          |
+| `POST /v1/chat/completions` | `POST` | Creates a model response for the given chat conversation.        |
+| `GET /v1/models`            | `GET`  | Lists the currently available models.                            |
+| `POST /v1/embeddings`       | `POST` | Creates an embedding vector representing the input text.         |
 
 ### Anthropic Compatible Endpoints
 
@@ -304,7 +305,16 @@ Here is an example `.claude/settings.json` file:
     "ANTHROPIC_BASE_URL": "http://localhost:4141",
     "ANTHROPIC_AUTH_TOKEN": "dummy",
     "ANTHROPIC_MODEL": "gpt-4.1",
-    "ANTHROPIC_SMALL_FAST_MODEL": "gpt-4.1"
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-4.1",
+    "ANTHROPIC_SMALL_FAST_MODEL": "gpt-4.1",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-4.1",
+    "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  },
+  "permissions": {
+    "deny": [
+      "WebSearch"
+    ]
   }
 }
 ```

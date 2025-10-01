@@ -41,10 +41,6 @@ export function translateChunkToAnthropicEvents(
         model: chunk.model,
         stop_reason: null,
         stop_sequence: null,
-        usage: {
-          input_tokens: chunk.usage?.prompt_tokens ?? 0,
-          output_tokens: 0, // Will be updated in message_delta when finished
-        },
       },
     })
     state.messageStartSent = true
@@ -152,7 +148,9 @@ export function translateChunkToAnthropicEvents(
           stop_sequence: null,
         },
         usage: {
-          input_tokens: chunk.usage?.prompt_tokens ?? 0,
+          input_tokens:
+            (chunk.usage?.prompt_tokens ?? 0)
+            - (chunk.usage?.prompt_tokens_details?.cached_tokens ?? 0),
           output_tokens: chunk.usage?.completion_tokens ?? 0,
           ...(chunk.usage?.prompt_tokens_details?.cached_tokens
             !== undefined && {

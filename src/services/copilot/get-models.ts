@@ -28,6 +28,9 @@ interface ModelSupports {
   tool_calls?: boolean
   parallel_tool_calls?: boolean
   dimensions?: boolean
+  streaming?: boolean
+  structured_outputs?: boolean
+  vision?: boolean
 }
 
 interface ModelCapabilities {
@@ -39,7 +42,7 @@ interface ModelCapabilities {
   type: string
 }
 
-interface Model {
+export interface Model {
   capabilities: ModelCapabilities
   id: string
   model_picker_enabled: boolean
@@ -52,4 +55,5 @@ interface Model {
     state: string
     terms: string
   }
+  supported_endpoints?: Array<string>
 }
