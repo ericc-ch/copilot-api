@@ -12,7 +12,6 @@ node_modules/
 
 # build output
 dist/
-logs/gemini-debug.log
-logs/gemini-translation.log
+
+# environment variables
 .env
-logs/gemini-errors.log
