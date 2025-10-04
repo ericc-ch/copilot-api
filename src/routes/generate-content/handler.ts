@@ -37,6 +37,7 @@ import {
   type GeminiCountTokensRequest,
   type GeminiStreamResponse,
   type GeminiResponse,
+  type GeminiCandidate,
 } from "./types"
 
 // Unified generation handler following Claude's two-branch pattern
@@ -99,7 +100,12 @@ function handleNonStreamingToStreaming(
       for (const candidate of geminiResponse.candidates) {
         for (const part of candidate.content.parts) {
           if ("text" in part && typeof part.text === "string") {
-            await sendTextInChunks(stream, part.text, geminiResponse)
+            await sendTextInChunks({
+              stream,
+              text: part.text,
+              candidate,
+              geminiResponse,
+            })
             hasSentAnyContent = true
           } else if ("functionCall" in part) {
             // Stream function call as JSON event
@@ -146,11 +152,13 @@ function handleNonStreamingToStreaming(
 }
 
 // Helper function to send text in chunks with configuration object
-async function sendTextInChunks(
-  stream: SSEStreamingApi,
-  text: string,
-  geminiResponse: GeminiResponse,
-) {
+async function sendTextInChunks(options: {
+  stream: SSEStreamingApi
+  text: string
+  candidate: GeminiCandidate
+  geminiResponse: GeminiResponse
+}) {
+  const { stream, text, candidate, geminiResponse } = options
   const chunkSize = Math.max(1, Math.min(50, text.length))
   let lastWritePromise: Promise<void> = Promise.resolve()
 
@@ -164,9 +172,8 @@ async function sendTextInChunks(
             parts: [{ text: chunk }],
             role: "model",
           },
-          finishReason:
-            isLast ? geminiResponse.candidates[0]?.finishReason : undefined,
-          index: 0,
+          finishReason: isLast ? candidate.finishReason : undefined,
+          index: candidate.index,
         },
       ],
       ...(isLast && geminiResponse.usageMetadata ?

@@ -54,11 +54,12 @@ export class DebugLogger {
    * - functionCall.args → "[REDACTED]"
    * - functionResponse.response → "[REDACTED]"
    *
-   * Enable redaction by setting DEBUG_REDACT_SENSITIVE=true
+   * Redaction is enabled by default. To disable redaction (not recommended),
+   * set DISABLE_REDACTION=true in the environment.
    */
   private redactSensitiveData(payload: GeminiRequest): GeminiRequest {
-    // Skip redaction if not explicitly enabled
-    if (process.env.DEBUG_REDACT_SENSITIVE !== "true") {
+    // Redact by default; only skip if explicitly disabled
+    if (process.env.DISABLE_REDACTION === "true") {
       return payload
     }
 
