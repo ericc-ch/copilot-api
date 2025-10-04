@@ -44,6 +44,70 @@ export class DebugLogger {
     return join(this.logDir, `debug-gemini-${timestamp}-${requestId}.log`)
   }
 
+  /**
+   * Redact sensitive data from Gemini request payloads to reduce risk of
+   * accidental data exposure when DEBUG_GEMINI_REQUESTS is enabled.
+   *
+   * Redacted fields:
+   * - contents[].parts[].text → "[REDACTED]"
+   * - systemInstruction.parts[].text → "[REDACTED]"
+   * - functionCall.args → "[REDACTED]"
+   * - functionResponse.response → "[REDACTED]"
+   *
+   * Enable redaction by setting DEBUG_REDACT_SENSITIVE=true
+   */
+  private redactSensitiveData(payload: GeminiRequest): GeminiRequest {
+    // Skip redaction if not explicitly enabled
+    if (process.env.DEBUG_REDACT_SENSITIVE !== "true") {
+      return payload
+    }
+
+    // Deep clone to avoid mutating original
+    const redacted = structuredClone(payload)
+
+    // Redact contents
+    redacted.contents = redacted.contents.map((content) => ({
+      ...content,
+      parts: content.parts.map((part) => {
+        if ("text" in part) {
+          return { text: "[REDACTED]" }
+        }
+        if ("functionCall" in part) {
+          return {
+            functionCall: {
+              name: part.functionCall.name,
+              args: "[REDACTED]" as unknown as Record<string, unknown>,
+            },
+          }
+        }
+        if ("functionResponse" in part) {
+          return {
+            functionResponse: {
+              name: part.functionResponse.name,
+              response: { redacted: true } as Record<string, unknown>,
+            },
+          }
+        }
+        return part
+      }),
+    }))
+
+    // Redact system instruction
+    if (redacted.systemInstruction) {
+      redacted.systemInstruction = {
+        ...redacted.systemInstruction,
+        parts: redacted.systemInstruction.parts.map((part) => {
+          if ("text" in part) {
+            return { text: "[REDACTED]" }
+          }
+          return part
+        }),
+      }
+    }
+
+    return redacted
+  }
+
   async logRequest(data: {
     requestId: string
     geminiPayload: GeminiRequest
@@ -54,7 +118,7 @@ export class DebugLogger {
     const logData: DebugLogData = {
       timestamp: new Date().toISOString(),
       requestId: data.requestId,
-      originalGeminiPayload: data.geminiPayload,
+      originalGeminiPayload: this.redactSensitiveData(data.geminiPayload),
       translatedOpenAIPayload: data.openAIPayload ?? null,
       error: data.error,
       processingTime: data.processingTime,

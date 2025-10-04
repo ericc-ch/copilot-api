@@ -93,15 +93,39 @@ function handleNonStreamingToStreaming(
 ) {
   return streamSSE(c, async (stream) => {
     try {
-      const firstPart = geminiResponse.candidates[0]?.content?.parts?.[0]
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      const hasTextContent = firstPart && "text" in firstPart
+      let hasSentAnyContent = false
 
-      // eslint-disable-next-line unicorn/prefer-ternary
-      if (hasTextContent) {
-        await sendTextInChunks(stream, firstPart.text, geminiResponse)
-      } else {
-        await sendFallbackResponse(stream, geminiResponse)
+      // Iterate over all candidates and all parts to preserve full response fidelity
+      for (const candidate of geminiResponse.candidates) {
+        for (const part of candidate.content.parts) {
+          if ("text" in part && typeof part.text === "string") {
+            await sendTextInChunks(stream, part.text, geminiResponse)
+            hasSentAnyContent = true
+          } else if ("functionCall" in part) {
+            // Stream function call as JSON event
+            await stream.writeSSE({
+              data: JSON.stringify({
+                candidates: [
+                  {
+                    content: { parts: [part] },
+                    finishReason: candidate.finishReason,
+                    index: candidate.index,
+                  },
+                ],
+              }),
+            })
+            hasSentAnyContent = true
+          }
+        }
+      }
+
+      // Fallback: if no content was sent, send the entire response as-is
+      if (!hasSentAnyContent) {
+        const streamResponse: GeminiStreamResponse = {
+          candidates: geminiResponse.candidates,
+          usageMetadata: geminiResponse.usageMetadata,
+        }
+        await stream.writeSSE({ data: JSON.stringify(streamResponse) })
       }
 
       // Add a small delay to ensure all data is flushed
@@ -159,19 +183,6 @@ async function sendTextInChunks(
 
   // Wait for final write to complete
   await lastWritePromise
-}
-
-// Helper function to send fallback response
-async function sendFallbackResponse(
-  stream: SSEStreamingApi,
-  geminiResponse: GeminiResponse,
-) {
-  const streamResponse: GeminiStreamResponse = {
-    candidates: geminiResponse.candidates,
-    usageMetadata: geminiResponse.usageMetadata,
-  }
-
-  await stream.writeSSE({ data: JSON.stringify(streamResponse) })
 }
 
 // Simplified Gemini streaming state (inspired by Claude AnthropicStreamState)
