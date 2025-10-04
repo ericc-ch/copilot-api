@@ -1,6 +1,6 @@
 {
   "name": "copilot-api",
-  "version": "0.5.14",
+  "version": "0.6.1",
   "description": "Turn GitHub Copilot into OpenAI/Anthropic API compatible server. Usable with Claude Code!",
   "keywords": [
     "proxy",
@@ -25,7 +25,8 @@
     "build": "tsdown",
     "dev": "bun run --watch ./src/main.ts",
     "knip": "knip-bun",
-    "lint": "eslint . --cache",
+    "lint": "eslint --cache",
+    "lint:all": "eslint --cache .",
     "prepack": "bun run build",
     "prepare": "simple-git-hooks",
     "release": "bumpp && bun publish --access public",
@@ -40,24 +41,28 @@
   },
   "dependencies": {
     "citty": "^0.1.6",
-    "clipboardy": "^4.0.0",
+    "clipboardy": "^5.0.0",
     "consola": "^3.4.2",
     "fetch-event-stream": "^0.1.5",
     "gpt-tokenizer": "^3.0.1",
-    "hono": "^4.9.6",
-    "srvx": "^0.8.7",
-    "tiny-invariant": "^1.3.3"
+    "hono": "^4.9.9",
+    "proxy-from-env": "^1.1.0",
+    "srvx": "^0.8.9",
+    "tiny-invariant": "^1.3.3",
+    "undici": "^7.16.0",
+    "zod": "^4.1.11"
   },
   "devDependencies": {
     "@echristian/eslint-config": "^0.0.54",
-    "@types/bun": "^1.2.21",
+    "@types/bun": "^1.2.23",
+    "@types/proxy-from-env": "^1.0.4",
     "bumpp": "^10.2.3",
-    "eslint": "^9.35.0",
-    "knip": "^5.63.1",
-    "lint-staged": "^16.1.6",
+    "eslint": "^9.37.0",
+    "knip": "^5.64.1",
+    "lint-staged": "^16.2.3",
     "prettier-plugin-packagejson": "^2.5.19",
     "simple-git-hooks": "^2.13.1",
-    "tsdown": "^0.14.2",
-    "typescript": "^5.9.2"
+    "tsdown": "^0.15.6",
+    "typescript": "^5.9.3"
   }
 }

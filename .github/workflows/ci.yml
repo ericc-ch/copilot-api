@@ -20,7 +20,7 @@ jobs:
         run: bun install
 
       - name: Run linter
-        run: bun run lint
+        run: bun run lint:all
 
       - name: Run type check
         run: bun run typecheck

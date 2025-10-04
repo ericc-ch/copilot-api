@@ -24,7 +24,7 @@ const anthropicContentBlockToolUseSchema = z.object({
   type: z.literal("tool_use"),
   id: z.string(),
   name: z.string(),
-  input: z.record(z.any()),
+  input: z.record(z.string(), z.any()),
 })
 
 const anthropicMessageResponseSchema = z.object({
@@ -52,18 +52,16 @@ function isValidAnthropicResponse(payload: unknown): boolean {
   return anthropicMessageResponseSchema.safeParse(payload).success
 }
 
-const anthropicStreamEventSchema = z
-  .object({
-    type: z.enum([
-      "message_start",
-      "content_block_start",
-      "content_block_delta",
-      "content_block_stop",
-      "message_delta",
-      "message_stop",
-    ]),
-  })
-  .passthrough()
+const anthropicStreamEventSchema = z.looseObject({
+  type: z.enum([
+    "message_start",
+    "content_block_start",
+    "content_block_delta",
+    "content_block_stop",
+    "message_delta",
+    "message_stop",
+  ]),
+})
 
 function isValidAnthropicStreamEvent(payload: unknown): boolean {
   return anthropicStreamEventSchema.safeParse(payload).success
