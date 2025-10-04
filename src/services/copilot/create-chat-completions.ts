@@ -25,7 +25,7 @@ export const createChatCompletions = async (
   // Build headers and add X-Initiator
   const headers: Record<string, string> = {
     ...copilotHeaders(state, enableVision),
-    "X-Initiator": isAgentCall ? "agent" : "agent",
+    "X-Initiator": isAgentCall ? "agent" : "user",
   }
 
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {

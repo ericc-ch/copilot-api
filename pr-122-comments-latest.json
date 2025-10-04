@@ -1,0 +1,899 @@
+[
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753587",
+        "pull_request_review_id": 3292191122,
+        "id": 2396753587,
+        "node_id": "PRRC_kwDONot0Ic6O246z",
+        "diff_hunk": "@@ -0,0 +1,724 @@\n+import { DebugLogger } from \"~/lib/debug-logger\"\n+import {\n+  translateGeminiToolsToOpenAI,\n+  translateGeminiToolConfigToOpenAI,\n+  generateToolCallId,\n+  synthesizeToolsFromContents,\n+  ToolCallAccumulator,\n+  processToolCalls as processToolCallsWithAccumulator,\n+} from \"~/lib/tool-call-utils\"\n+import {\n+  type ChatCompletionResponse,\n+  type ChatCompletionChunk,\n+  type ChatCompletionsPayload,\n+  type ContentPart,\n+  type Message,\n+  type Tool,\n+  type ToolCall,\n+} from \"~/services/copilot/create-chat-completions\"\n+\n+import {\n+  type GeminiRequest,\n+  type GeminiResponse,\n+  type GeminiContent,\n+  type GeminiPart,\n+  type GeminiTextPart,\n+  type GeminiFunctionCallPart,\n+  type GeminiFunctionResponsePart,\n+  type GeminiTool,\n+  type GeminiCandidate,\n+  type GeminiCountTokensRequest,\n+  type GeminiCountTokensResponse,\n+  type GeminiUsageMetadata,\n+} from \"./types\"\n+import { mapOpenAIFinishReasonToGemini } from \"./utils\"\n+\n+// Model mapping for Gemini models - only map unsupported variants to supported ones\n+function mapGeminiModelToCopilot(geminiModel: string): string {\n+  const modelMap: Record<string, string> = {\n+    \"gemini-2.5-flash\": \"gemini-2.0-flash-001\", // Map to supported Gemini model\n+    \"gemini-2.0-flash\": \"gemini-2.0-flash-001\", // Map to full model name\n+    \"gemini-2.5-flash-lite\": \"gemini-2.0-flash-001\", // Map to full model name\n+  }\n+\n+  return modelMap[geminiModel] || geminiModel // Return original if supported\n+}\n+\n+function selectTools(\n+  geminiTools?: Array<GeminiTool>,\n+  contents?: Array<\n+    | GeminiContent\n+    | Array<{\n+        functionResponse: { id?: string; name: string; response: unknown }\n+      }>\n+  >,\n+): Array<Tool> | undefined {\n+  return (\n+    translateGeminiToolsToOpenAI(geminiTools)\n+    || (contents ? synthesizeToolsFromContents(contents) : undefined)\n+  )\n+}\n+\n+// Request translation: Gemini -> OpenAI\n+\n+export function translateGeminiToOpenAI(\n+  payload: GeminiRequest,\n+  model: string,\n+  stream: boolean,\n+): ChatCompletionsPayload {\n+  const tools = selectTools(payload.tools, payload.contents)\n+  const result = {\n+    model: mapGeminiModelToCopilot(model),\n+    messages: translateGeminiContentsToOpenAI(\n+      payload.contents,\n+      payload.systemInstruction,\n+    ),\n+    max_tokens: (payload.generationConfig?.maxOutputTokens as number) || 4096,\n+    stop: payload.generationConfig?.stopSequences as Array<string> | undefined,\n+    stream,\n+    temperature: payload.generationConfig?.temperature as number | undefined,\n+    top_p: payload.generationConfig?.topP as number | undefined,\n+    tools,\n+    tool_choice:\n+      tools ? translateGeminiToolConfigToOpenAI(payload.toolConfig) : undefined,\n+  }\n+\n+  return result\n+}\n+\n+// Helper function to process function response arrays\n+function processFunctionResponseArray(\n+  responseArray: Array<{\n+    functionResponse: { name: string; response: unknown }\n+  }>,\n+  pendingToolCalls: Map<string, string>,\n+  messages: Array<Message>,\n+): void {\n+  for (const responseItem of responseArray) {\n+    if (\"functionResponse\" in responseItem) {\n+      const functionName = responseItem.functionResponse.name\n+      // Find tool call ID by searching through the map\n+      let matchedToolCallId: string | undefined\n+      for (const [\n+        toolCallId,\n+        mappedFunctionName,\n+      ] of pendingToolCalls.entries()) {\n+        if (mappedFunctionName === functionName) {\n+          matchedToolCallId = toolCallId\n+          break\n+        }\n+      }\n+      if (matchedToolCallId) {\n+        messages.push({\n+          role: \"tool\",\n+          tool_call_id: matchedToolCallId,\n+          content: JSON.stringify(responseItem.functionResponse.response),\n+        })\n+        pendingToolCalls.delete(matchedToolCallId)\n+      }\n+    }\n+  }\n+}\n+\n+// Helper function to check if tool calls have corresponding tool responses\n+function hasCorrespondingToolResponses(\n+  messages: Array<Message>,\n+  toolCalls: Array<ToolCall>,\n+): boolean {\n+  const toolCallIds = new Set(toolCalls.map((call) => call.id))\n+\n+  // Look for tool messages that respond to these tool calls\n+  for (const message of messages) {\n+    if (message.role === \"tool\" && message.tool_call_id) {\n+      toolCallIds.delete(message.tool_call_id)\n+    }\n+  }\n+\n+  // If any tool call ID remains, it means there's no corresponding response\n+  return toolCallIds.size === 0\n+}\n+\n+// Helper function to process function responses in content\n+function processFunctionResponses(\n+  functionResponses: Array<GeminiFunctionResponsePart>,\n+  pendingToolCalls: Map<string, string>,\n+  messages: Array<Message>,\n+): void {\n+  for (const funcResponse of functionResponses) {\n+    const functionName = funcResponse.functionResponse.name\n+    // Find tool call ID by searching through the map\n+    let matchedToolCallId: string | undefined\n+    for (const [toolCallId, mappedFunctionName] of pendingToolCalls.entries()) {\n+      if (mappedFunctionName === functionName) {\n+        matchedToolCallId = toolCallId\n+        break\n+      }\n+    }\n+    if (matchedToolCallId) {\n+      messages.push({\n+        role: \"tool\",\n+        tool_call_id: matchedToolCallId,\n+        content: JSON.stringify(funcResponse.functionResponse.response),\n+      })\n+      pendingToolCalls.delete(matchedToolCallId)\n+    }\n+  }\n+}\n+\n+// Helper function to process function calls and create assistant message\n+function processFunctionCalls(options: {\n+  functionCalls: Array<GeminiFunctionCallPart>\n+  content: GeminiContent\n+  pendingToolCalls: Map<string, string>\n+  messages: Array<Message>\n+}): void {\n+  const { functionCalls, content, pendingToolCalls, messages } = options\n+\n+  const textContent = extractTextFromGeminiContent(content)\n+  const toolCalls = functionCalls.map((call) => {\n+    const toolCallId = generateToolCallId(call.functionCall.name)\n+    // Remember this tool call for later matching with responses\n+    // Use tool_call_id as key to avoid duplicate function name overwrites\n+    pendingToolCalls.set(toolCallId, call.functionCall.name)\n+\n+    return {\n+      id: toolCallId,\n+      type: \"function\" as const,\n+      function: {\n+        name: call.functionCall.name,\n+        arguments: JSON.stringify(call.functionCall.args),\n+      },\n+    }\n+  })\n+\n+  messages.push({\n+    role: \"assistant\",\n+    content: textContent || null,\n+    tool_calls: toolCalls,\n+  })\n+}\n+\n+// Helper function to check if a tool response is duplicate\n+function isDuplicateToolResponse(\n+  message: Message,\n+  seenToolCallIds: Set<string>,\n+): boolean {\n+  return (\n+    message.role === \"tool\"\n+    && message.tool_call_id !== undefined\n+    && seenToolCallIds.has(message.tool_call_id)\n+  )\n+}\n+\n+// Helper function to normalize user message content\n+function normalizeUserMessageContent(message: Message): void {\n+  if (\n+    message.role === \"user\"\n+    && typeof message.content === \"string\"\n+    && !message.content.trim()\n+  ) {\n+    message.content = \" \" // Add minimal text content as fallback\n+  }\n+}\n+\n+// Helper function to check if messages can be merged\n+function canMergeMessages(\n+  lastMessage: Message,\n+  currentMessage: Message,\n+): boolean {\n+  return (\n+    lastMessage.role === currentMessage.role\n+    && !lastMessage.tool_calls\n+    && !currentMessage.tool_calls\n+    && !(lastMessage as { tool_call_id?: string }).tool_call_id\n+    && !(currentMessage as { tool_call_id?: string }).tool_call_id\n+    && typeof lastMessage.content === \"string\"\n+    && typeof currentMessage.content === \"string\"\n+  )\n+}\n+\n+// Helper function to check if message should be skipped\n+function shouldSkipMessage(\n+  message: Message,\n+  messages: Array<Message>,\n+  seenToolCallIds: Set<string>,\n+): boolean {\n+  // Skip incomplete assistant messages with tool calls that have no responses\n+  if (\n+    message.role === \"assistant\"\n+    && message.tool_calls\n+    && !hasCorrespondingToolResponses(messages, message.tool_calls)\n+  ) {\n+    return true\n+  }\n+\n+  // Skip duplicate tool responses\n+  if (isDuplicateToolResponse(message, seenToolCallIds)) {\n+    return true\n+  }\n+\n+  return false\n+}\n+\n+// Helper function to process and add message to cleaned array\n+function processAndAddMessage(\n+  message: Message,\n+  cleanedMessages: Array<Message>,\n+  seenToolCallIds: Set<string>,\n+): void {\n+  // Track tool call IDs for deduplication\n+  if (message.role === \"tool\" && message.tool_call_id) {\n+    seenToolCallIds.add(message.tool_call_id)\n+  }\n+\n+  // Normalize user message content\n+  normalizeUserMessageContent(message)\n+\n+  // Try to merge with previous message\n+  const lastMessage = cleanedMessages.at(-1)\n+  if (lastMessage && canMergeMessages(lastMessage, message)) {\n+    // Merge with previous message of same role\n+    // canMergeMessages already ensures both contents are strings\n+    if (\n+      typeof lastMessage.content === \"string\"\n+      && typeof message.content === \"string\"\n+    ) {\n+      lastMessage.content = `${lastMessage.content}\\n\\n${message.content}`\n+    }\n+  } else {\n+    cleanedMessages.push(message)\n+  }\n+}\n+\n+// Consolidated message cleanup function\n+function cleanupMessages(messages: Array<Message>): Array<Message> {\n+  const cleanedMessages: Array<Message> = []\n+  const seenToolCallIds = new Set<string>()\n+\n+  for (const message of messages) {\n+    if (shouldSkipMessage(message, messages, seenToolCallIds)) {\n+      continue\n+    }\n+\n+    processAndAddMessage(message, cleanedMessages, seenToolCallIds)\n+  }\n+\n+  return cleanedMessages\n+}\n+\n+function translateGeminiContentsToOpenAI(\n+  contents: Array<\n+    | GeminiContent\n+    | Array<{\n+        functionResponse: { id?: string; name: string; response: unknown }\n+      }>\n+  >,\n+  systemInstruction?: GeminiContent,\n+): Array<Message> {\n+  const messages: Array<Message> = []\n+  const pendingToolCalls = new Map<string, string>() // tool_call_id -> function_name\n+\n+  // Add system instruction first if present\n+  if (systemInstruction) {\n+    const systemText = extractTextFromGeminiContent(systemInstruction)\n+    if (systemText) {\n+      messages.push({ role: \"system\", content: systemText })\n+    }\n+  }\n+\n+  // Process conversation contents\n+  for (const item of contents) {\n+    // Handle special case where Gemini CLI sends function responses as nested arrays\n+    if (Array.isArray(item)) {\n+      processFunctionResponseArray(item, pendingToolCalls, messages)\n+      continue\n+    }\n+\n+    const content = item\n+    const role = content.role === \"model\" ? \"assistant\" : \"user\"\n+\n+    // Check for function calls/responses\n+    const functionCalls = content.parts.filter(\n+      (part): part is GeminiFunctionCallPart => \"functionCall\" in part,\n+    )\n+    const functionResponses = content.parts.filter(\n+      (part): part is GeminiFunctionResponsePart => \"functionResponse\" in part,\n+    )\n+\n+    if (functionResponses.length > 0) {\n+      processFunctionResponses(functionResponses, pendingToolCalls, messages)\n+    }\n+\n+    if (functionCalls.length > 0 && role === \"assistant\") {\n+      processFunctionCalls({\n+        functionCalls,\n+        content,\n+        pendingToolCalls,\n+        messages,\n+      })\n+    } else {\n+      // Regular message\n+      const messageContent = translateGeminiContentToOpenAI(content)\n+      if (messageContent) {\n+        messages.push({ role, content: messageContent })\n+      }\n+    }\n+  }\n+\n+  // Post-process: Clean up messages and ensure tool call consistency\n+  return cleanupMessages(messages)\n+}\n+\n+function translateGeminiContentToOpenAI(\n+  content: GeminiContent,\n+): string | Array<ContentPart> | null {\n+  if (content.parts.length === 0) return null\n+\n+  const hasMedia = content.parts.some((part) => \"inlineData\" in part)\n+\n+  if (!hasMedia) {\n+    // Text-only content\n+    return extractTextFromGeminiContent(content)\n+  }\n+\n+  // Mixed content with media\n+  const contentParts: Array<ContentPart> = []\n+  for (const part of content.parts) {\n+    if (\"text\" in part) {\n+      contentParts.push({ type: \"text\", text: part.text })\n+    } else if (\"inlineData\" in part) {\n+      // Handle inline data for images - this is a legacy format\n+      const partWithInlineData = part as {\n+        inlineData: { mimeType: string; data: string }\n+      }\n+      contentParts.push({\n+        type: \"image_url\",\n+        image_url: {\n+          url: `data:${partWithInlineData.inlineData.mimeType};base64,${partWithInlineData.inlineData.data}`,\n+        },\n+      })\n+    }\n+  }\n+\n+  return contentParts\n+}\n+\n+function extractTextFromGeminiContent(content: GeminiContent): string {\n+  return content.parts\n+    .filter((part): part is GeminiTextPart => \"text\" in part)\n+    .map((part) => part.text)\n+    .join(\"\\n\\n\")\n+}\n+\n+// Response translation: OpenAI -> Gemini\n+\n+// Helper function to deduplicate tool responses - remove duplicate tool_call_ids\n+// The problem was our logic was CREATING duplicates instead of preventing them\n+\n+export function translateOpenAIToGemini(\n+  response: ChatCompletionResponse,\n+): GeminiResponse {\n+  const result = {\n+    candidates: response.choices.map((choice, index) => ({\n+      content: translateOpenAIMessageToGeminiContent(choice.message),\n+      finishReason: mapOpenAIFinishReasonToGemini(choice.finish_reason),\n+      index,\n+    })),\n+    usageMetadata: {\n+      promptTokenCount: response.usage?.prompt_tokens || 0,\n+      candidatesTokenCount: response.usage?.completion_tokens || 0,\n+      totalTokenCount: response.usage?.total_tokens || 0,\n+    },\n+  }\n+\n+  // Debug: Log original GitHub Copilot response and translated Gemini response\n+  if (process.env.DEBUG_GEMINI_REQUESTS === \"true\") {\n+    DebugLogger.logResponseComparison(response, result, {\n+      context: \"Non-Stream Response Translation\",\n+      filePrefix: \"debug-nonstream-comparison\",\n+    }).catch((error: unknown) => {\n+      console.error(\n+        \"[DEBUG] Failed to log non-stream response comparison:\",\n+        error,\n+      )\n+    })\n+  }\n+\n+  return result\n+}\n+\n+function translateOpenAIMessageToGeminiContent(\n+  message: Message,\n+): GeminiContent {\n+  const parts: Array<GeminiPart> = []\n+\n+  // Handle text content\n+  if (typeof message.content === \"string\") {\n+    if (message.content) {\n+      parts.push({ text: message.content })\n+    }\n+  } else if (Array.isArray(message.content)) {\n+    for (const part of message.content) {\n+      if (part.type === \"text\") {\n+        parts.push({ text: part.text })\n+      } else {\n+        // Convert data URL back to inline data\n+        const match = part.image_url.url.match(/^data:([^;]+);base64,(.+)$/)\n+        if (match) {\n+          parts.push({\n+            inlineData: {\n+              mimeType: match[1],\n+              data: match[2],\n+            },\n+          })\n+        }\n+      }\n+    }\n+  }\n+\n+  // Handle tool calls\n+  if (message.tool_calls) {\n+    for (const toolCall of message.tool_calls) {\n+      // Debug: Log tool call arguments to verify what GitHub Copilot returns\n+      if (process.env.DEBUG_GEMINI_REQUESTS === \"true\") {\n+        console.log(\n+          `[DEBUG] Tool call - name: ${toolCall.function.name}, arguments: \"${toolCall.function.arguments}\", type: ${typeof toolCall.function.arguments}, truthy: ${Boolean(toolCall.function.arguments)}`,\n+        )\n+      }\n+\n+      parts.push({\n+        functionCall: {\n+          name: toolCall.function.name,\n+          args:\n+            toolCall.function.arguments ?\n+              (JSON.parse(toolCall.function.arguments) as Record<\n+                string,\n+                unknown\n+              >)\n+            : {},",
+        "path": "src/routes/generate-content/translation.ts",
+        "commit_id": "0d5886373cfa8ce670d98c4bf25e14b28bfd2c0d",
+        "original_commit_id": "e04137d411cd9af04cb0751dcac801e6f37691f9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "Unprotected JSON.parse on toolCall.function.arguments can throw and crash the translation path if the upstream returns malformed JSON (e.g., partial or invalid arguments); wrap in try/catch and fall back to an empty object to avoid failing the entire response translation.\n```suggestion\n          args: (() => {\n            if (toolCall.function.arguments) {\n              try {\n                return JSON.parse(toolCall.function.arguments) as Record<string, unknown>;\n              } catch (e) {\n                if (process.env.DEBUG_GEMINI_REQUESTS === \"true\") {\n                  console.warn(`[DEBUG] Failed to parse toolCall.function.arguments: \"${toolCall.function.arguments}\". Error:`, e);\n                }\n                return {};\n              }\n            } else {\n              return {};\n            }\n          })(),\n```",
+        "created_at": "2025-10-02T04:28:38Z",
+        "updated_at": "2025-10-02T04:28:40Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2396753587",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753587"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2396753587"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753587/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": null,
+        "original_start_line": 492,
+        "start_side": "RIGHT",
+        "line": null,
+        "original_line": 498,
+        "side": "RIGHT",
+        "original_position": 498,
+        "position": 1,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753616",
+        "pull_request_review_id": 3292191122,
+        "id": 2396753616,
+        "node_id": "PRRC_kwDONot0Ic6O247Q",
+        "diff_hunk": "@@ -0,0 +1,724 @@\n+import { DebugLogger } from \"~/lib/debug-logger\"\n+import {\n+  translateGeminiToolsToOpenAI,\n+  translateGeminiToolConfigToOpenAI,\n+  generateToolCallId,\n+  synthesizeToolsFromContents,\n+  ToolCallAccumulator,\n+  processToolCalls as processToolCallsWithAccumulator,\n+} from \"~/lib/tool-call-utils\"\n+import {\n+  type ChatCompletionResponse,\n+  type ChatCompletionChunk,\n+  type ChatCompletionsPayload,\n+  type ContentPart,\n+  type Message,\n+  type Tool,\n+  type ToolCall,\n+} from \"~/services/copilot/create-chat-completions\"\n+\n+import {\n+  type GeminiRequest,\n+  type GeminiResponse,\n+  type GeminiContent,\n+  type GeminiPart,\n+  type GeminiTextPart,\n+  type GeminiFunctionCallPart,\n+  type GeminiFunctionResponsePart,\n+  type GeminiTool,\n+  type GeminiCandidate,\n+  type GeminiCountTokensRequest,\n+  type GeminiCountTokensResponse,\n+  type GeminiUsageMetadata,\n+} from \"./types\"\n+import { mapOpenAIFinishReasonToGemini } from \"./utils\"\n+\n+// Model mapping for Gemini models - only map unsupported variants to supported ones\n+function mapGeminiModelToCopilot(geminiModel: string): string {\n+  const modelMap: Record<string, string> = {\n+    \"gemini-2.5-flash\": \"gemini-2.0-flash-001\", // Map to supported Gemini model\n+    \"gemini-2.0-flash\": \"gemini-2.0-flash-001\", // Map to full model name\n+    \"gemini-2.5-flash-lite\": \"gemini-2.0-flash-001\", // Map to full model name\n+  }\n+\n+  return modelMap[geminiModel] || geminiModel // Return original if supported\n+}\n+\n+function selectTools(\n+  geminiTools?: Array<GeminiTool>,\n+  contents?: Array<\n+    | GeminiContent\n+    | Array<{\n+        functionResponse: { id?: string; name: string; response: unknown }\n+      }>\n+  >,\n+): Array<Tool> | undefined {\n+  return (\n+    translateGeminiToolsToOpenAI(geminiTools)\n+    || (contents ? synthesizeToolsFromContents(contents) : undefined)\n+  )\n+}\n+\n+// Request translation: Gemini -> OpenAI\n+\n+export function translateGeminiToOpenAI(\n+  payload: GeminiRequest,\n+  model: string,\n+  stream: boolean,\n+): ChatCompletionsPayload {\n+  const tools = selectTools(payload.tools, payload.contents)\n+  const result = {\n+    model: mapGeminiModelToCopilot(model),\n+    messages: translateGeminiContentsToOpenAI(\n+      payload.contents,\n+      payload.systemInstruction,\n+    ),\n+    max_tokens: (payload.generationConfig?.maxOutputTokens as number) || 4096,\n+    stop: payload.generationConfig?.stopSequences as Array<string> | undefined,\n+    stream,\n+    temperature: payload.generationConfig?.temperature as number | undefined,\n+    top_p: payload.generationConfig?.topP as number | undefined,\n+    tools,\n+    tool_choice:\n+      tools ? translateGeminiToolConfigToOpenAI(payload.toolConfig) : undefined,\n+  }\n+\n+  return result\n+}\n+\n+// Helper function to process function response arrays\n+function processFunctionResponseArray(\n+  responseArray: Array<{\n+    functionResponse: { name: string; response: unknown }\n+  }>,\n+  pendingToolCalls: Map<string, string>,\n+  messages: Array<Message>,\n+): void {\n+  for (const responseItem of responseArray) {\n+    if (\"functionResponse\" in responseItem) {\n+      const functionName = responseItem.functionResponse.name\n+      // Find tool call ID by searching through the map\n+      let matchedToolCallId: string | undefined\n+      for (const [\n+        toolCallId,\n+        mappedFunctionName,\n+      ] of pendingToolCalls.entries()) {\n+        if (mappedFunctionName === functionName) {\n+          matchedToolCallId = toolCallId\n+          break\n+        }\n+      }\n+      if (matchedToolCallId) {\n+        messages.push({\n+          role: \"tool\",\n+          tool_call_id: matchedToolCallId,\n+          content: JSON.stringify(responseItem.functionResponse.response),\n+        })\n+        pendingToolCalls.delete(matchedToolCallId)\n+      }\n+    }\n+  }",
+        "path": "src/routes/generate-content/translation.ts",
+        "commit_id": "0d5886373cfa8ce670d98c4bf25e14b28bfd2c0d",
+        "original_commit_id": "e04137d411cd9af04cb0751dcac801e6f37691f9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "[nitpick] Logic here duplicates the matching loop also implemented in processFunctionResponses (lines 142–166); extract a shared helper (e.g., matchAndEmitToolResponse) to avoid divergence and make future changes (like supporting different matching strategies) in one place.",
+        "created_at": "2025-10-02T04:28:38Z",
+        "updated_at": "2025-10-02T04:28:40Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2396753616",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753616"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2396753616"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753616/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": null,
+        "original_start_line": 89,
+        "start_side": "RIGHT",
+        "line": null,
+        "original_line": 120,
+        "side": "RIGHT",
+        "original_position": 120,
+        "position": 1,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753640",
+        "pull_request_review_id": 3292191122,
+        "id": 2396753640,
+        "node_id": "PRRC_kwDONot0Ic6O247o",
+        "diff_hunk": "@@ -0,0 +1,724 @@\n+import { DebugLogger } from \"~/lib/debug-logger\"\n+import {\n+  translateGeminiToolsToOpenAI,\n+  translateGeminiToolConfigToOpenAI,\n+  generateToolCallId,\n+  synthesizeToolsFromContents,\n+  ToolCallAccumulator,\n+  processToolCalls as processToolCallsWithAccumulator,\n+} from \"~/lib/tool-call-utils\"\n+import {\n+  type ChatCompletionResponse,\n+  type ChatCompletionChunk,\n+  type ChatCompletionsPayload,\n+  type ContentPart,\n+  type Message,\n+  type Tool,\n+  type ToolCall,\n+} from \"~/services/copilot/create-chat-completions\"\n+\n+import {\n+  type GeminiRequest,\n+  type GeminiResponse,\n+  type GeminiContent,\n+  type GeminiPart,\n+  type GeminiTextPart,\n+  type GeminiFunctionCallPart,\n+  type GeminiFunctionResponsePart,\n+  type GeminiTool,\n+  type GeminiCandidate,\n+  type GeminiCountTokensRequest,\n+  type GeminiCountTokensResponse,\n+  type GeminiUsageMetadata,\n+} from \"./types\"\n+import { mapOpenAIFinishReasonToGemini } from \"./utils\"\n+\n+// Model mapping for Gemini models - only map unsupported variants to supported ones\n+function mapGeminiModelToCopilot(geminiModel: string): string {\n+  const modelMap: Record<string, string> = {\n+    \"gemini-2.5-flash\": \"gemini-2.0-flash-001\", // Map to supported Gemini model\n+    \"gemini-2.0-flash\": \"gemini-2.0-flash-001\", // Map to full model name\n+    \"gemini-2.5-flash-lite\": \"gemini-2.0-flash-001\", // Map to full model name\n+  }\n+\n+  return modelMap[geminiModel] || geminiModel // Return original if supported\n+}\n+\n+function selectTools(\n+  geminiTools?: Array<GeminiTool>,\n+  contents?: Array<\n+    | GeminiContent\n+    | Array<{\n+        functionResponse: { id?: string; name: string; response: unknown }\n+      }>\n+  >,\n+): Array<Tool> | undefined {\n+  return (\n+    translateGeminiToolsToOpenAI(geminiTools)\n+    || (contents ? synthesizeToolsFromContents(contents) : undefined)\n+  )\n+}\n+\n+// Request translation: Gemini -> OpenAI\n+\n+export function translateGeminiToOpenAI(\n+  payload: GeminiRequest,\n+  model: string,\n+  stream: boolean,\n+): ChatCompletionsPayload {\n+  const tools = selectTools(payload.tools, payload.contents)\n+  const result = {\n+    model: mapGeminiModelToCopilot(model),\n+    messages: translateGeminiContentsToOpenAI(\n+      payload.contents,\n+      payload.systemInstruction,\n+    ),\n+    max_tokens: (payload.generationConfig?.maxOutputTokens as number) || 4096,\n+    stop: payload.generationConfig?.stopSequences as Array<string> | undefined,\n+    stream,\n+    temperature: payload.generationConfig?.temperature as number | undefined,\n+    top_p: payload.generationConfig?.topP as number | undefined,\n+    tools,\n+    tool_choice:\n+      tools ? translateGeminiToolConfigToOpenAI(payload.toolConfig) : undefined,\n+  }\n+\n+  return result\n+}\n+\n+// Helper function to process function response arrays\n+function processFunctionResponseArray(\n+  responseArray: Array<{\n+    functionResponse: { name: string; response: unknown }\n+  }>,\n+  pendingToolCalls: Map<string, string>,\n+  messages: Array<Message>,\n+): void {\n+  for (const responseItem of responseArray) {\n+    if (\"functionResponse\" in responseItem) {\n+      const functionName = responseItem.functionResponse.name\n+      // Find tool call ID by searching through the map\n+      let matchedToolCallId: string | undefined\n+      for (const [\n+        toolCallId,\n+        mappedFunctionName,\n+      ] of pendingToolCalls.entries()) {\n+        if (mappedFunctionName === functionName) {\n+          matchedToolCallId = toolCallId\n+          break\n+        }\n+      }\n+      if (matchedToolCallId) {\n+        messages.push({\n+          role: \"tool\",\n+          tool_call_id: matchedToolCallId,\n+          content: JSON.stringify(responseItem.functionResponse.response),\n+        })\n+        pendingToolCalls.delete(matchedToolCallId)\n+      }\n+    }\n+  }\n+}\n+\n+// Helper function to check if tool calls have corresponding tool responses\n+function hasCorrespondingToolResponses(\n+  messages: Array<Message>,\n+  toolCalls: Array<ToolCall>,\n+): boolean {\n+  const toolCallIds = new Set(toolCalls.map((call) => call.id))\n+\n+  // Look for tool messages that respond to these tool calls\n+  for (const message of messages) {\n+    if (message.role === \"tool\" && message.tool_call_id) {\n+      toolCallIds.delete(message.tool_call_id)\n+    }\n+  }\n+\n+  // If any tool call ID remains, it means there's no corresponding response\n+  return toolCallIds.size === 0",
+        "path": "src/routes/generate-content/translation.ts",
+        "commit_id": "0d5886373cfa8ce670d98c4bf25e14b28bfd2c0d",
+        "original_commit_id": "e04137d411cd9af04cb0751dcac801e6f37691f9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "This function is invoked inside cleanupMessages for each assistant message with tool_calls, scanning the entire messages array each time (O(n^2) worst-case); consider precomputing a Set of tool_call_ids that have responses once and reusing it to reduce repeated full-array scans.\n```suggestion\n// Helper function to precompute tool_call_ids that have responses\nfunction getRespondedToolCallIds(messages: Array<Message>): Set<string> {\n  const respondedToolCallIds = new Set<string>();\n  for (const message of messages) {\n    if (message.role === \"tool\" && message.tool_call_id) {\n      respondedToolCallIds.add(message.tool_call_id);\n    }\n  }\n  return respondedToolCallIds;\n}\n\n// Helper function to check if tool calls have corresponding tool responses\nfunction hasCorrespondingToolResponses(\n  respondedToolCallIds: Set<string>,\n  toolCalls: Array<ToolCall>,\n): boolean {\n  for (const call of toolCalls) {\n    if (!respondedToolCallIds.has(call.id)) {\n      return false;\n    }\n  }\n  return true;\n```",
+        "created_at": "2025-10-02T04:28:38Z",
+        "updated_at": "2025-10-02T04:28:40Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2396753640",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753640"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2396753640"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753640/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": null,
+        "original_start_line": 123,
+        "start_side": "RIGHT",
+        "line": null,
+        "original_line": 138,
+        "side": "RIGHT",
+        "original_position": 138,
+        "position": 1,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753667",
+        "pull_request_review_id": 3292191122,
+        "id": 2396753667,
+        "node_id": "PRRC_kwDONot0Ic6O248D",
+        "diff_hunk": "@@ -0,0 +1,313 @@\n+import type { Context } from \"hono\"\n+import type { SSEStreamingApi } from \"hono/streaming\"\n+\n+import { streamSSE } from \"hono/streaming\"\n+\n+import { awaitApproval } from \"~/lib/approval\"\n+import { DebugLogger } from \"~/lib/debug-logger\"\n+import { checkRateLimit } from \"~/lib/rate-limit\"\n+import { state } from \"~/lib/state\"\n+import { getTokenCount } from \"~/lib/tokenizer\"\n+import {\n+  createChatCompletions,\n+  type ChatCompletionResponse,\n+  type ChatCompletionChunk,\n+} from \"~/services/copilot/create-chat-completions\"\n+\n+// Helper function to extract model from URL path\n+function extractModelFromUrl(url: string): string {\n+  const match = url.match(/\\/v1beta\\/models\\/([^:]+):/)\n+  if (!match) {\n+    throw new Error(\"Model name is required in URL path\")\n+  }\n+  return match[1]\n+}\n+\n+import { ToolCallAccumulator } from \"~/lib/tool-call-utils\"\n+\n+import {\n+  translateGeminiToOpenAI,\n+  translateOpenAIToGemini,\n+  translateGeminiCountTokensToOpenAI,\n+  translateTokenCountToGemini,\n+  translateOpenAIChunkToGemini,\n+} from \"./translation\"\n+import {\n+  type GeminiRequest,\n+  type GeminiCountTokensRequest,\n+  type GeminiStreamResponse,\n+  type GeminiResponse,\n+} from \"./types\"\n+\n+// Unified generation handler following Claude's two-branch pattern\n+export async function handleGeminiGeneration(\n+  c: Context,\n+  stream: boolean = false,\n+) {\n+  const model = extractModelFromUrl(c.req.url)\n+\n+  if (!model) {\n+    throw new Error(\"Model name is required in URL path\")\n+  }\n+\n+  await checkRateLimit(state)\n+\n+  const geminiPayload = await c.req.json<GeminiRequest>()\n+  const openAIPayload = translateGeminiToOpenAI(geminiPayload, model, stream)\n+\n+  // Log request for debugging (async, non-blocking) - only if debug logging is enabled\n+  if (process.env.DEBUG_GEMINI_REQUESTS === \"true\") {\n+    DebugLogger.logGeminiRequest(geminiPayload, openAIPayload).catch(\n+      (error: unknown) => {\n+        console.error(\"[DEBUG] Failed to log request:\", error)\n+      },\n+    )\n+  }\n+\n+  if (state.manualApprove) {\n+    await awaitApproval()\n+  }\n+\n+  const response = await createChatCompletions(openAIPayload)\n+\n+  if (isNonStreaming(response)) {\n+    const geminiResponse = translateOpenAIToGemini(response)\n+\n+    if (stream) {\n+      return handleNonStreamingToStreaming(c, geminiResponse)\n+    }\n+    return c.json(geminiResponse)\n+  }\n+\n+  if (!stream) {\n+    throw new Error(\"Unexpected streaming response for non-streaming endpoint\")\n+  }\n+\n+  return handleStreamingResponse(c, response)\n+}\n+\n+// Helper function to handle non-streaming response conversion\n+function handleNonStreamingToStreaming(\n+  c: Context,\n+  geminiResponse: GeminiResponse,\n+) {\n+  return streamSSE(c, async (stream) => {\n+    try {\n+      const firstPart = geminiResponse.candidates[0]?.content?.parts?.[0]\n+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition\n+      const hasTextContent = firstPart && \"text\" in firstPart\n+\n+      // eslint-disable-next-line unicorn/prefer-ternary\n+      if (hasTextContent) {\n+        await sendTextInChunks(stream, firstPart.text, geminiResponse)\n+      } else {\n+        await sendFallbackResponse(stream, geminiResponse)\n+      }\n+",
+        "path": "src/routes/generate-content/handler.ts",
+        "commit_id": "7a0f4460ad3eda10a0dd01d18611ad5e600b28bf",
+        "original_commit_id": "e04137d411cd9af04cb0751dcac801e6f37691f9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "The non-streaming to streaming fallback only streams the first text part of the first candidate, discarding additional parts (e.g., functionCall parts or subsequent text) and all other candidates; iterate over all parts (and candidates if needed) to preserve full response fidelity.\n```suggestion\n      // Iterate over all candidates and all parts, streaming each part\n      for (const candidate of geminiResponse.candidates ?? []) {\n        for (const part of candidate.content?.parts ?? []) {\n          if (\"text\" in part && typeof part.text === \"string\") {\n            await sendTextInChunks(stream, part.text, geminiResponse)\n          } else {\n            // For non-text parts, stream as JSON event\n            await stream.writeSSE({\n              event: \"function_call\",\n              data: JSON.stringify(part),\n            })\n          }\n        }\n      }\n```",
+        "created_at": "2025-10-02T04:28:39Z",
+        "updated_at": "2025-10-02T04:28:40Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2396753667",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753667"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2396753667"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753667/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": null,
+        "original_start_line": 96,
+        "start_side": "RIGHT",
+        "line": null,
+        "original_line": 106,
+        "side": "RIGHT",
+        "original_position": 106,
+        "position": 1,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753704",
+        "pull_request_review_id": 3292191122,
+        "id": 2396753704,
+        "node_id": "PRRC_kwDONot0Ic6O248o",
+        "diff_hunk": "@@ -0,0 +1,179 @@\n+import { existsSync, mkdirSync } from \"node:fs\"\n+import { writeFile } from \"node:fs/promises\"\n+import { join } from \"node:path\"\n+\n+import type { GeminiRequest } from \"~/routes/generate-content/types\"\n+import type {\n+  ChatCompletionsPayload,\n+  ChatCompletionResponse,\n+} from \"~/services/copilot/create-chat-completions\"\n+\n+interface DebugLogData {\n+  timestamp: string\n+  requestId: string\n+  originalGeminiPayload: GeminiRequest\n+  translatedOpenAIPayload: ChatCompletionsPayload | null\n+  error?: string\n+  processingTime?: number\n+}\n+\n+export class DebugLogger {\n+  private static instance: DebugLogger | undefined\n+  private logDir: string\n+\n+  private constructor() {\n+    this.logDir = process.env.DEBUG_LOG_DIR || join(process.cwd(), \"debug-logs\")\n+    this.ensureLogDir()\n+  }\n+\n+  static getInstance(): DebugLogger {\n+    if (!DebugLogger.instance) {\n+      DebugLogger.instance = new DebugLogger()\n+    }\n+    return DebugLogger.instance\n+  }\n+\n+  private ensureLogDir(): void {\n+    if (!existsSync(this.logDir)) {\n+      mkdirSync(this.logDir, { recursive: true })\n+    }\n+  }\n+\n+  private generateLogFileName(requestId: string): string {\n+    const timestamp = new Date().toISOString().replaceAll(/[:.]/g, \"-\")\n+    return join(this.logDir, `debug-gemini-${timestamp}-${requestId}.log`)\n+  }\n+\n+  async logRequest(data: {\n+    requestId: string\n+    geminiPayload: GeminiRequest\n+    openAIPayload?: ChatCompletionsPayload | null\n+    error?: string\n+    processingTime?: number\n+  }): Promise<void> {\n+    const logData: DebugLogData = {\n+      timestamp: new Date().toISOString(),\n+      requestId: data.requestId,\n+      originalGeminiPayload: data.geminiPayload,\n+      translatedOpenAIPayload: data.openAIPayload ?? null,\n+      error: data.error,\n+      processingTime: data.processingTime,\n+    }\n+\n+    const logPath = this.generateLogFileName(data.requestId)\n+\n+    try {\n+      await writeFile(logPath, JSON.stringify(logData, null, 2), \"utf8\")",
+        "path": "src/lib/debug-logger.ts",
+        "commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "original_commit_id": "e04137d411cd9af04cb0751dcac801e6f37691f9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "Entire raw request payloads (including potential user/content data) are persisted without redaction; consider filtering or redacting sensitive fields (e.g., contents[].parts[].text, function arguments) or providing an allowlist to reduce risk of accidental data exposure when DEBUG_GEMINI_REQUESTS is enabled.",
+        "created_at": "2025-10-02T04:28:39Z",
+        "updated_at": "2025-10-02T04:28:40Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2396753704",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753704"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2396753704"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2396753704/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": 118,
+        "original_start_line": 54,
+        "start_side": "RIGHT",
+        "line": 130,
+        "original_line": 66,
+        "side": "RIGHT",
+        "original_position": 66,
+        "position": 130,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986381",
+        "pull_request_review_id": 3301886195,
+        "id": 2403986381,
+        "node_id": "PRRC_kwDONot0Ic6PSevN",
+        "diff_hunk": "@@ -0,0 +1,333 @@\n+import type { Context } from \"hono\"\n+import type { SSEStreamingApi } from \"hono/streaming\"\n+\n+import { streamSSE } from \"hono/streaming\"\n+\n+import { awaitApproval } from \"~/lib/approval\"\n+import { DebugLogger } from \"~/lib/debug-logger\"\n+import { checkRateLimit } from \"~/lib/rate-limit\"\n+import { state } from \"~/lib/state\"\n+import { getTokenCount } from \"~/lib/tokenizer\"\n+import {\n+  createChatCompletions,\n+  type ChatCompletionResponse,\n+  type ChatCompletionChunk,\n+} from \"~/services/copilot/create-chat-completions\"\n+\n+// Helper function to extract model from URL path\n+function extractModelFromUrl(url: string): string {\n+  const match = url.match(/\\/v1beta\\/models\\/([^:]+):/)\n+  if (!match) {\n+    throw new Error(\"Model name is required in URL path\")\n+  }\n+  return match[1]\n+}\n+\n+import { ToolCallAccumulator } from \"~/lib/tool-call-utils\"\n+\n+import {\n+  translateGeminiToOpenAI,\n+  translateOpenAIToGemini,\n+  translateGeminiCountTokensToOpenAI,\n+  translateTokenCountToGemini,\n+  translateOpenAIChunkToGemini,\n+} from \"./translation\"\n+import {\n+  type GeminiRequest,\n+  type GeminiCountTokensRequest,\n+  type GeminiStreamResponse,\n+  type GeminiResponse,\n+} from \"./types\"\n+\n+// Unified generation handler following Claude's two-branch pattern\n+export async function handleGeminiGeneration(\n+  c: Context,\n+  stream: boolean = false,\n+) {\n+  const model = extractModelFromUrl(c.req.url)\n+\n+  if (!model) {\n+    throw new Error(\"Model name is required in URL path\")\n+  }\n+\n+  await checkRateLimit(state)\n+\n+  const geminiPayload = await c.req.json<GeminiRequest>()\n+  const openAIPayload = translateGeminiToOpenAI(geminiPayload, model, stream)\n+\n+  // Log request for debugging (async, non-blocking) - only if debug logging is enabled\n+  if (process.env.DEBUG_GEMINI_REQUESTS === \"true\") {\n+    DebugLogger.logGeminiRequest(geminiPayload, openAIPayload).catch(\n+      (error: unknown) => {\n+        console.error(\"[DEBUG] Failed to log request:\", error)\n+      },\n+    )\n+  }\n+\n+  if (state.manualApprove) {\n+    await awaitApproval()\n+  }\n+\n+  const response = await createChatCompletions(openAIPayload)\n+\n+  if (isNonStreaming(response)) {\n+    const geminiResponse = translateOpenAIToGemini(response)\n+\n+    if (stream) {\n+      return handleNonStreamingToStreaming(c, geminiResponse)\n+    }\n+    return c.json(geminiResponse)\n+  }\n+\n+  if (!stream) {\n+    throw new Error(\"Unexpected streaming response for non-streaming endpoint\")\n+  }\n+\n+  return handleStreamingResponse(c, response)\n+}\n+\n+// Helper function to handle non-streaming response conversion\n+function handleNonStreamingToStreaming(\n+  c: Context,\n+  geminiResponse: GeminiResponse,\n+) {\n+  return streamSSE(c, async (stream) => {\n+    try {\n+      let hasSentAnyContent = false\n+\n+      // Iterate over all candidates and all parts to preserve full response fidelity\n+      for (const candidate of geminiResponse.candidates) {\n+        for (const part of candidate.content.parts) {\n+          if (\"text\" in part && typeof part.text === \"string\") {\n+            await sendTextInChunks(stream, part.text, geminiResponse)\n+            hasSentAnyContent = true\n+          } else if (\"functionCall\" in part) {\n+            // Stream function call as JSON event\n+            await stream.writeSSE({\n+              data: JSON.stringify({\n+                candidates: [\n+                  {\n+                    content: { parts: [part] },\n+                    finishReason: candidate.finishReason,\n+                    index: candidate.index,\n+                  },\n+                ],\n+              }),\n+            })\n+            hasSentAnyContent = true\n+          }\n+        }\n+      }",
+        "path": "src/routes/generate-content/handler.ts",
+        "commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "original_commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "When converting a non-streaming multi-candidate response to streaming, sendTextInChunks always emits index: 0 and uses geminiResponse.candidates[0]?.finishReason, ignoring the actual candidate currently being iterated (candidate.index and its finishReason). This produces incorrect candidate metadata if more than one candidate is returned. Pass the current candidate (or its index & finishReason) into sendTextInChunks and use those instead of hard-coded candidate 0.",
+        "created_at": "2025-10-04T13:58:55Z",
+        "updated_at": "2025-10-04T13:58:58Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986381",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986381"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986381"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986381/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": 99,
+        "original_start_line": 99,
+        "start_side": "RIGHT",
+        "line": 120,
+        "original_line": 120,
+        "side": "RIGHT",
+        "original_position": 120,
+        "position": 120,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986382",
+        "pull_request_review_id": 3301886195,
+        "id": 2403986382,
+        "node_id": "PRRC_kwDONot0Ic6PSevO",
+        "diff_hunk": "@@ -0,0 +1,333 @@\n+import type { Context } from \"hono\"\n+import type { SSEStreamingApi } from \"hono/streaming\"\n+\n+import { streamSSE } from \"hono/streaming\"\n+\n+import { awaitApproval } from \"~/lib/approval\"\n+import { DebugLogger } from \"~/lib/debug-logger\"\n+import { checkRateLimit } from \"~/lib/rate-limit\"\n+import { state } from \"~/lib/state\"\n+import { getTokenCount } from \"~/lib/tokenizer\"\n+import {\n+  createChatCompletions,\n+  type ChatCompletionResponse,\n+  type ChatCompletionChunk,\n+} from \"~/services/copilot/create-chat-completions\"\n+\n+// Helper function to extract model from URL path\n+function extractModelFromUrl(url: string): string {\n+  const match = url.match(/\\/v1beta\\/models\\/([^:]+):/)\n+  if (!match) {\n+    throw new Error(\"Model name is required in URL path\")\n+  }\n+  return match[1]\n+}\n+\n+import { ToolCallAccumulator } from \"~/lib/tool-call-utils\"\n+\n+import {\n+  translateGeminiToOpenAI,\n+  translateOpenAIToGemini,\n+  translateGeminiCountTokensToOpenAI,\n+  translateTokenCountToGemini,\n+  translateOpenAIChunkToGemini,\n+} from \"./translation\"\n+import {\n+  type GeminiRequest,\n+  type GeminiCountTokensRequest,\n+  type GeminiStreamResponse,\n+  type GeminiResponse,\n+} from \"./types\"\n+\n+// Unified generation handler following Claude's two-branch pattern\n+export async function handleGeminiGeneration(\n+  c: Context,\n+  stream: boolean = false,\n+) {\n+  const model = extractModelFromUrl(c.req.url)\n+\n+  if (!model) {\n+    throw new Error(\"Model name is required in URL path\")\n+  }\n+\n+  await checkRateLimit(state)\n+\n+  const geminiPayload = await c.req.json<GeminiRequest>()\n+  const openAIPayload = translateGeminiToOpenAI(geminiPayload, model, stream)\n+\n+  // Log request for debugging (async, non-blocking) - only if debug logging is enabled\n+  if (process.env.DEBUG_GEMINI_REQUESTS === \"true\") {\n+    DebugLogger.logGeminiRequest(geminiPayload, openAIPayload).catch(\n+      (error: unknown) => {\n+        console.error(\"[DEBUG] Failed to log request:\", error)\n+      },\n+    )\n+  }\n+\n+  if (state.manualApprove) {\n+    await awaitApproval()\n+  }\n+\n+  const response = await createChatCompletions(openAIPayload)\n+\n+  if (isNonStreaming(response)) {\n+    const geminiResponse = translateOpenAIToGemini(response)\n+\n+    if (stream) {\n+      return handleNonStreamingToStreaming(c, geminiResponse)\n+    }\n+    return c.json(geminiResponse)\n+  }\n+\n+  if (!stream) {\n+    throw new Error(\"Unexpected streaming response for non-streaming endpoint\")\n+  }\n+\n+  return handleStreamingResponse(c, response)\n+}\n+\n+// Helper function to handle non-streaming response conversion\n+function handleNonStreamingToStreaming(\n+  c: Context,\n+  geminiResponse: GeminiResponse,\n+) {\n+  return streamSSE(c, async (stream) => {\n+    try {\n+      let hasSentAnyContent = false\n+\n+      // Iterate over all candidates and all parts to preserve full response fidelity\n+      for (const candidate of geminiResponse.candidates) {\n+        for (const part of candidate.content.parts) {\n+          if (\"text\" in part && typeof part.text === \"string\") {\n+            await sendTextInChunks(stream, part.text, geminiResponse)\n+            hasSentAnyContent = true\n+          } else if (\"functionCall\" in part) {\n+            // Stream function call as JSON event\n+            await stream.writeSSE({\n+              data: JSON.stringify({\n+                candidates: [\n+                  {\n+                    content: { parts: [part] },\n+                    finishReason: candidate.finishReason,\n+                    index: candidate.index,\n+                  },\n+                ],\n+              }),\n+            })\n+            hasSentAnyContent = true\n+          }\n+        }\n+      }\n+\n+      // Fallback: if no content was sent, send the entire response as-is\n+      if (!hasSentAnyContent) {\n+        const streamResponse: GeminiStreamResponse = {\n+          candidates: geminiResponse.candidates,\n+          usageMetadata: geminiResponse.usageMetadata,\n+        }\n+        await stream.writeSSE({ data: JSON.stringify(streamResponse) })\n+      }\n+\n+      // Add a small delay to ensure all data is flushed\n+      await new Promise((resolve) => setTimeout(resolve, 50))\n+    } catch (error) {\n+      console.error(\"[GEMINI_STREAM] Error in non-streaming conversion\", error)\n+    } finally {\n+      try {\n+        await stream.close()\n+      } catch (closeError) {\n+        console.error(\n+          \"[GEMINI_STREAM] Error closing non-streaming conversion stream\",\n+          closeError,\n+        )\n+      }\n+    }\n+  })\n+}\n+\n+// Helper function to send text in chunks with configuration object\n+async function sendTextInChunks(\n+  stream: SSEStreamingApi,\n+  text: string,\n+  geminiResponse: GeminiResponse,\n+) {\n+  const chunkSize = Math.max(1, Math.min(50, text.length))\n+  let lastWritePromise: Promise<void> = Promise.resolve()\n+\n+  for (let i = 0; i < text.length; i += chunkSize) {\n+    const chunk = text.slice(i, i + chunkSize)\n+    const isLast = i + chunkSize >= text.length\n+    const streamResponse: GeminiStreamResponse = {\n+      candidates: [\n+        {\n+          content: {\n+            parts: [{ text: chunk }],\n+            role: \"model\",\n+          },\n+          finishReason:\n+            isLast ? geminiResponse.candidates[0]?.finishReason : undefined,\n+          index: 0,\n+        },\n+      ],\n+      ...(isLast && geminiResponse.usageMetadata ?\n+        { usageMetadata: geminiResponse.usageMetadata }\n+      : {}),\n+    }",
+        "path": "src/routes/generate-content/handler.ts",
+        "commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "original_commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "When converting a non-streaming multi-candidate response to streaming, sendTextInChunks always emits index: 0 and uses geminiResponse.candidates[0]?.finishReason, ignoring the actual candidate currently being iterated (candidate.index and its finishReason). This produces incorrect candidate metadata if more than one candidate is returned. Pass the current candidate (or its index & finishReason) into sendTextInChunks and use those instead of hard-coded candidate 0.",
+        "created_at": "2025-10-04T13:58:55Z",
+        "updated_at": "2025-10-04T13:58:58Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986382",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986382"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986382"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986382/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": 149,
+        "original_start_line": 149,
+        "start_side": "RIGHT",
+        "line": 175,
+        "original_line": 175,
+        "side": "RIGHT",
+        "original_position": 175,
+        "position": 175,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986383",
+        "pull_request_review_id": 3301886195,
+        "id": 2403986383,
+        "node_id": "PRRC_kwDONot0Ic6PSevP",
+        "diff_hunk": "@@ -0,0 +1,333 @@\n+import type { Context } from \"hono\"\n+import type { SSEStreamingApi } from \"hono/streaming\"\n+\n+import { streamSSE } from \"hono/streaming\"\n+\n+import { awaitApproval } from \"~/lib/approval\"\n+import { DebugLogger } from \"~/lib/debug-logger\"\n+import { checkRateLimit } from \"~/lib/rate-limit\"\n+import { state } from \"~/lib/state\"\n+import { getTokenCount } from \"~/lib/tokenizer\"\n+import {\n+  createChatCompletions,\n+  type ChatCompletionResponse,\n+  type ChatCompletionChunk,\n+} from \"~/services/copilot/create-chat-completions\"\n+\n+// Helper function to extract model from URL path\n+function extractModelFromUrl(url: string): string {\n+  const match = url.match(/\\/v1beta\\/models\\/([^:]+):/)\n+  if (!match) {\n+    throw new Error(\"Model name is required in URL path\")\n+  }\n+  return match[1]\n+}\n+\n+import { ToolCallAccumulator } from \"~/lib/tool-call-utils\"\n+\n+import {\n+  translateGeminiToOpenAI,\n+  translateOpenAIToGemini,\n+  translateGeminiCountTokensToOpenAI,\n+  translateTokenCountToGemini,\n+  translateOpenAIChunkToGemini,\n+} from \"./translation\"\n+import {\n+  type GeminiRequest,\n+  type GeminiCountTokensRequest,\n+  type GeminiStreamResponse,\n+  type GeminiResponse,\n+} from \"./types\"\n+\n+// Unified generation handler following Claude's two-branch pattern\n+export async function handleGeminiGeneration(\n+  c: Context,\n+  stream: boolean = false,\n+) {\n+  const model = extractModelFromUrl(c.req.url)\n+\n+  if (!model) {\n+    throw new Error(\"Model name is required in URL path\")\n+  }\n+\n+  await checkRateLimit(state)\n+\n+  const geminiPayload = await c.req.json<GeminiRequest>()\n+  const openAIPayload = translateGeminiToOpenAI(geminiPayload, model, stream)\n+\n+  // Log request for debugging (async, non-blocking) - only if debug logging is enabled\n+  if (process.env.DEBUG_GEMINI_REQUESTS === \"true\") {\n+    DebugLogger.logGeminiRequest(geminiPayload, openAIPayload).catch(\n+      (error: unknown) => {\n+        console.error(\"[DEBUG] Failed to log request:\", error)\n+      },\n+    )\n+  }\n+\n+  if (state.manualApprove) {\n+    await awaitApproval()\n+  }\n+\n+  const response = await createChatCompletions(openAIPayload)\n+\n+  if (isNonStreaming(response)) {\n+    const geminiResponse = translateOpenAIToGemini(response)\n+\n+    if (stream) {\n+      return handleNonStreamingToStreaming(c, geminiResponse)\n+    }\n+    return c.json(geminiResponse)\n+  }\n+\n+  if (!stream) {\n+    throw new Error(\"Unexpected streaming response for non-streaming endpoint\")\n+  }\n+\n+  return handleStreamingResponse(c, response)\n+}\n+\n+// Helper function to handle non-streaming response conversion\n+function handleNonStreamingToStreaming(\n+  c: Context,\n+  geminiResponse: GeminiResponse,\n+) {\n+  return streamSSE(c, async (stream) => {\n+    try {\n+      let hasSentAnyContent = false\n+\n+      // Iterate over all candidates and all parts to preserve full response fidelity\n+      for (const candidate of geminiResponse.candidates) {\n+        for (const part of candidate.content.parts) {\n+          if (\"text\" in part && typeof part.text === \"string\") {\n+            await sendTextInChunks(stream, part.text, geminiResponse)\n+            hasSentAnyContent = true\n+          } else if (\"functionCall\" in part) {\n+            // Stream function call as JSON event\n+            await stream.writeSSE({\n+              data: JSON.stringify({\n+                candidates: [\n+                  {\n+                    content: { parts: [part] },\n+                    finishReason: candidate.finishReason,\n+                    index: candidate.index,\n+                  },\n+                ],\n+              }),\n+            })\n+            hasSentAnyContent = true\n+          }\n+        }\n+      }\n+\n+      // Fallback: if no content was sent, send the entire response as-is\n+      if (!hasSentAnyContent) {\n+        const streamResponse: GeminiStreamResponse = {\n+          candidates: geminiResponse.candidates,\n+          usageMetadata: geminiResponse.usageMetadata,\n+        }\n+        await stream.writeSSE({ data: JSON.stringify(streamResponse) })\n+      }\n+\n+      // Add a small delay to ensure all data is flushed\n+      await new Promise((resolve) => setTimeout(resolve, 50))\n+    } catch (error) {\n+      console.error(\"[GEMINI_STREAM] Error in non-streaming conversion\", error)\n+    } finally {\n+      try {\n+        await stream.close()\n+      } catch (closeError) {\n+        console.error(\n+          \"[GEMINI_STREAM] Error closing non-streaming conversion stream\",\n+          closeError,\n+        )\n+      }\n+    }\n+  })\n+}\n+\n+// Helper function to send text in chunks with configuration object\n+async function sendTextInChunks(\n+  stream: SSEStreamingApi,\n+  text: string,\n+  geminiResponse: GeminiResponse,\n+) {\n+  const chunkSize = Math.max(1, Math.min(50, text.length))",
+        "path": "src/routes/generate-content/handler.ts",
+        "commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "original_commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "[nitpick] Chunking every text response into maximum 50-character SSE events can create excessive event overhead for longer outputs (many small network flushes). Consider using a larger minimum (e.g. 256–1024 chars) or streaming the full part unless there is a concrete requirement to artificially segment text.\n```suggestion\n  const chunkSize = Math.max(1, Math.min(512, text.length))\n```",
+        "created_at": "2025-10-04T13:58:55Z",
+        "updated_at": "2025-10-04T13:58:58Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986383",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986383"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986383"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986383/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": null,
+        "original_start_line": null,
+        "start_side": null,
+        "line": 154,
+        "original_line": 154,
+        "side": "RIGHT",
+        "original_position": 154,
+        "position": 154,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986391",
+        "pull_request_review_id": 3301886195,
+        "id": 2403986391,
+        "node_id": "PRRC_kwDONot0Ic6PSevX",
+        "diff_hunk": "@@ -0,0 +1,243 @@\n+import { existsSync, mkdirSync } from \"node:fs\"\n+import { writeFile } from \"node:fs/promises\"\n+import { join } from \"node:path\"\n+\n+import type { GeminiRequest } from \"~/routes/generate-content/types\"\n+import type {\n+  ChatCompletionsPayload,\n+  ChatCompletionResponse,\n+} from \"~/services/copilot/create-chat-completions\"\n+\n+interface DebugLogData {\n+  timestamp: string\n+  requestId: string\n+  originalGeminiPayload: GeminiRequest\n+  translatedOpenAIPayload: ChatCompletionsPayload | null\n+  error?: string\n+  processingTime?: number\n+}\n+\n+export class DebugLogger {\n+  private static instance: DebugLogger | undefined\n+  private logDir: string\n+\n+  private constructor() {\n+    this.logDir = process.env.DEBUG_LOG_DIR || join(process.cwd(), \"debug-logs\")\n+    this.ensureLogDir()\n+  }\n+\n+  static getInstance(): DebugLogger {\n+    if (!DebugLogger.instance) {\n+      DebugLogger.instance = new DebugLogger()\n+    }\n+    return DebugLogger.instance\n+  }\n+\n+  private ensureLogDir(): void {\n+    if (!existsSync(this.logDir)) {\n+      mkdirSync(this.logDir, { recursive: true })\n+    }\n+  }\n+\n+  private generateLogFileName(requestId: string): string {\n+    const timestamp = new Date().toISOString().replaceAll(/[:.]/g, \"-\")\n+    return join(this.logDir, `debug-gemini-${timestamp}-${requestId}.log`)\n+  }\n+\n+  /**\n+   * Redact sensitive data from Gemini request payloads to reduce risk of\n+   * accidental data exposure when DEBUG_GEMINI_REQUESTS is enabled.\n+   *\n+   * Redacted fields:\n+   * - contents[].parts[].text → \"[REDACTED]\"\n+   * - systemInstruction.parts[].text → \"[REDACTED]\"\n+   * - functionCall.args → \"[REDACTED]\"\n+   * - functionResponse.response → \"[REDACTED]\"\n+   *\n+   * Enable redaction by setting DEBUG_REDACT_SENSITIVE=true\n+   */\n+  private redactSensitiveData(payload: GeminiRequest): GeminiRequest {\n+    // Skip redaction if not explicitly enabled\n+    if (process.env.DEBUG_REDACT_SENSITIVE !== \"true\") {",
+        "path": "src/lib/debug-logger.ts",
+        "commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "original_commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "Sensitive request content (user prompts, function arguments, function responses) is only redacted when DEBUG_REDACT_SENSITIVE==='true'; by default all data is written unredacted to disk when DEBUG_GEMINI_REQUESTS is enabled. This risks inadvertent leakage of sensitive data. Consider inverting the logic (redact by default, require an explicit DISABLE_REDACTION flag to bypass) or always redacting high-risk fields.\n```suggestion\n   * Redaction is enabled by default. To disable redaction (not recommended),\n   * set DISABLE_REDACTION=true in the environment.\n   */\n  private redactSensitiveData(payload: GeminiRequest): GeminiRequest {\n    // Redact by default; only skip if explicitly disabled\n    if (process.env.DISABLE_REDACTION === \"true\") {\n```",
+        "created_at": "2025-10-04T13:58:56Z",
+        "updated_at": "2025-10-04T13:58:58Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986391",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986391"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986391"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986391/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": 57,
+        "original_start_line": 57,
+        "start_side": "RIGHT",
+        "line": 61,
+        "original_line": 61,
+        "side": "RIGHT",
+        "original_position": 61,
+        "position": 61,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986395",
+        "pull_request_review_id": 3301886195,
+        "id": 2403986395,
+        "node_id": "PRRC_kwDONot0Ic6PSevb",
+        "diff_hunk": "@@ -0,0 +1,749 @@\n+import { DebugLogger } from \"~/lib/debug-logger\"\n+import {\n+  translateGeminiToolsToOpenAI,\n+  translateGeminiToolConfigToOpenAI,\n+  generateToolCallId,\n+  synthesizeToolsFromContents,\n+  ToolCallAccumulator,\n+  processToolCalls as processToolCallsWithAccumulator,\n+} from \"~/lib/tool-call-utils\"\n+import {\n+  type ChatCompletionResponse,\n+  type ChatCompletionChunk,\n+  type ChatCompletionsPayload,\n+  type ContentPart,\n+  type Message,\n+  type Tool,\n+} from \"~/services/copilot/create-chat-completions\"\n+\n+import {\n+  type GeminiRequest,\n+  type GeminiResponse,\n+  type GeminiContent,\n+  type GeminiPart,\n+  type GeminiTextPart,\n+  type GeminiFunctionCallPart,\n+  type GeminiFunctionResponsePart,\n+  type GeminiTool,\n+  type GeminiCandidate,\n+  type GeminiCountTokensRequest,\n+  type GeminiCountTokensResponse,\n+  type GeminiUsageMetadata,\n+} from \"./types\"\n+import { mapOpenAIFinishReasonToGemini } from \"./utils\"\n+\n+// Model mapping for Gemini models - only map unsupported variants to supported ones\n+function mapGeminiModelToCopilot(geminiModel: string): string {\n+  const modelMap: Record<string, string> = {\n+    \"gemini-2.5-flash\": \"gemini-2.0-flash-001\", // Map to supported Gemini model\n+    \"gemini-2.0-flash\": \"gemini-2.0-flash-001\", // Map to full model name\n+    \"gemini-2.5-flash-lite\": \"gemini-2.0-flash-001\", // Map to full model name\n+  }\n+\n+  return modelMap[geminiModel] || geminiModel // Return original if supported\n+}\n+\n+function selectTools(\n+  geminiTools?: Array<GeminiTool>,\n+  contents?: Array<\n+    | GeminiContent\n+    | Array<{\n+        functionResponse: { id?: string; name: string; response: unknown }\n+      }>\n+  >,\n+): Array<Tool> | undefined {\n+  return (\n+    translateGeminiToolsToOpenAI(geminiTools)\n+    || (contents ? synthesizeToolsFromContents(contents) : undefined)\n+  )\n+}\n+\n+// Request translation: Gemini -> OpenAI\n+\n+export function translateGeminiToOpenAI(\n+  payload: GeminiRequest,\n+  model: string,\n+  stream: boolean,\n+): ChatCompletionsPayload {\n+  const tools = selectTools(payload.tools, payload.contents)\n+  const result = {\n+    model: mapGeminiModelToCopilot(model),\n+    messages: translateGeminiContentsToOpenAI(\n+      payload.contents,\n+      payload.systemInstruction,\n+    ),\n+    max_tokens: (payload.generationConfig?.maxOutputTokens as number) || 4096,\n+    stop: payload.generationConfig?.stopSequences as Array<string> | undefined,\n+    stream,\n+    temperature: payload.generationConfig?.temperature as number | undefined,\n+    top_p: payload.generationConfig?.topP as number | undefined,\n+    tools,\n+    tool_choice:\n+      tools ? translateGeminiToolConfigToOpenAI(payload.toolConfig) : undefined,\n+  }\n+\n+  return result\n+}\n+\n+// Helper function to match function name to tool call ID and emit tool response\n+function matchAndEmitToolResponse(options: {\n+  functionName: string\n+  functionResponse: unknown\n+  pendingToolCalls: Map<string, string>\n+  messages: Array<Message>\n+}): void {\n+  const { functionName, functionResponse, pendingToolCalls, messages } = options\n+\n+  // Find tool call ID by searching through the map\n+  let matchedToolCallId: string | undefined\n+  for (const [toolCallId, mappedFunctionName] of pendingToolCalls.entries()) {\n+    if (mappedFunctionName === functionName) {\n+      matchedToolCallId = toolCallId\n+      break\n+    }\n+  }\n+\n+  if (matchedToolCallId) {\n+    messages.push({\n+      role: \"tool\",\n+      tool_call_id: matchedToolCallId,\n+      content: JSON.stringify(functionResponse),\n+    })\n+    pendingToolCalls.delete(matchedToolCallId)\n+  }\n+}\n+\n+// Helper function to process function response arrays\n+function processFunctionResponseArray(\n+  responseArray: Array<{\n+    functionResponse: { name: string; response: unknown }\n+  }>,\n+  pendingToolCalls: Map<string, string>,\n+  messages: Array<Message>,\n+): void {\n+  for (const responseItem of responseArray) {\n+    if (\"functionResponse\" in responseItem) {\n+      matchAndEmitToolResponse({\n+        functionName: responseItem.functionResponse.name,\n+        functionResponse: responseItem.functionResponse.response,\n+        pendingToolCalls,\n+        messages,\n+      })\n+    }\n+  }\n+}\n+\n+// Helper function to process function responses in content\n+function processFunctionResponses(\n+  functionResponses: Array<GeminiFunctionResponsePart>,\n+  pendingToolCalls: Map<string, string>,\n+  messages: Array<Message>,\n+): void {\n+  for (const funcResponse of functionResponses) {\n+    matchAndEmitToolResponse({\n+      functionName: funcResponse.functionResponse.name,\n+      functionResponse: funcResponse.functionResponse.response,\n+      pendingToolCalls,\n+      messages,\n+    })\n+  }\n+}\n+\n+// Helper function to process function calls and create assistant message\n+function processFunctionCalls(options: {\n+  functionCalls: Array<GeminiFunctionCallPart>\n+  content: GeminiContent\n+  pendingToolCalls: Map<string, string>\n+  messages: Array<Message>\n+}): void {\n+  const { functionCalls, content, pendingToolCalls, messages } = options\n+\n+  const textContent = extractTextFromGeminiContent(content)\n+  const toolCalls = functionCalls.map((call) => {\n+    const toolCallId = generateToolCallId(call.functionCall.name)\n+    // Remember this tool call for later matching with responses\n+    // Use tool_call_id as key to avoid duplicate function name overwrites\n+    pendingToolCalls.set(toolCallId, call.functionCall.name)\n+\n+    return {\n+      id: toolCallId,\n+      type: \"function\" as const,\n+      function: {\n+        name: call.functionCall.name,\n+        arguments: JSON.stringify(call.functionCall.args),\n+      },\n+    }\n+  })\n+\n+  messages.push({\n+    role: \"assistant\",\n+    content: textContent || null,\n+    tool_calls: toolCalls,\n+  })\n+}\n+\n+// Helper function to check if a tool response is duplicate\n+function isDuplicateToolResponse(\n+  message: Message,\n+  seenToolCallIds: Set<string>,\n+): boolean {\n+  return (\n+    message.role === \"tool\"\n+    && message.tool_call_id !== undefined\n+    && seenToolCallIds.has(message.tool_call_id)\n+  )\n+}\n+\n+// Helper function to normalize user message content\n+function normalizeUserMessageContent(message: Message): void {\n+  if (\n+    message.role === \"user\"\n+    && typeof message.content === \"string\"\n+    && !message.content.trim()\n+  ) {\n+    message.content = \" \" // Add minimal text content as fallback\n+  }\n+}\n+\n+// Helper function to check if messages can be merged\n+function canMergeMessages(\n+  lastMessage: Message,\n+  currentMessage: Message,\n+): boolean {\n+  return (\n+    lastMessage.role === currentMessage.role\n+    && !lastMessage.tool_calls\n+    && !currentMessage.tool_calls\n+    && !(lastMessage as { tool_call_id?: string }).tool_call_id\n+    && !(currentMessage as { tool_call_id?: string }).tool_call_id\n+    && typeof lastMessage.content === \"string\"\n+    && typeof currentMessage.content === \"string\"\n+  )\n+}\n+\n+// Helper function to process and add message to cleaned array\n+function processAndAddMessage(\n+  message: Message,\n+  cleanedMessages: Array<Message>,\n+  seenToolCallIds: Set<string>,\n+): void {\n+  // Track tool call IDs for deduplication\n+  if (message.role === \"tool\" && message.tool_call_id) {\n+    seenToolCallIds.add(message.tool_call_id)\n+  }\n+\n+  // Normalize user message content\n+  normalizeUserMessageContent(message)\n+\n+  // Try to merge with previous message\n+  const lastMessage = cleanedMessages.at(-1)\n+  if (lastMessage && canMergeMessages(lastMessage, message)) {\n+    // Merge with previous message of same role\n+    // canMergeMessages already ensures both contents are strings\n+    if (\n+      typeof lastMessage.content === \"string\"\n+      && typeof message.content === \"string\"\n+    ) {\n+      lastMessage.content = `${lastMessage.content}\\n\\n${message.content}`\n+    }\n+  } else {\n+    cleanedMessages.push(message)\n+  }\n+}\n+\n+// Consolidated message cleanup function\n+function cleanupMessages(messages: Array<Message>): Array<Message> {\n+  const cleanedMessages: Array<Message> = []\n+  const seenToolCallIds = new Set<string>()\n+\n+  // Pre-build a set of all tool_call_ids that have tool responses (O(n))\n+  const toolCallIdsWithResponses = new Set<string>()\n+  for (const message of messages) {\n+    if (message.role === \"tool\" && message.tool_call_id) {\n+      toolCallIdsWithResponses.add(message.tool_call_id)\n+    }\n+  }\n+\n+  for (const message of messages) {\n+    // Skip incomplete assistant messages with tool calls that have no responses\n+    if (message.role === \"assistant\" && message.tool_calls) {\n+      // Check if all tool calls have responses\n+      const hasAllResponses = message.tool_calls.every((call) =>\n+        toolCallIdsWithResponses.has(call.id),\n+      )\n+      if (!hasAllResponses) {\n+        continue\n+      }\n+    }\n+\n+    // Skip duplicate tool responses\n+    if (isDuplicateToolResponse(message, seenToolCallIds)) {\n+      continue\n+    }\n+\n+    processAndAddMessage(message, cleanedMessages, seenToolCallIds)\n+  }\n+\n+  return cleanedMessages\n+}\n+\n+/**\n+ * Translates Gemini conversation contents to OpenAI message format.\n+ *\n+ * This function handles complex transformations including:\n+ * - Converting Gemini \"model\" role to OpenAI \"assistant\" role\n+ * - Processing tool calls (function calls) and their responses\n+ * - Managing tool call ID mapping through pendingToolCalls Map\n+ * - Handling special nested array format for function responses (Gemini CLI compatibility)\n+ * - Cleaning up incomplete tool calls and deduplicating tool responses\n+ *\n+ * @remarks\n+ * The `pendingToolCalls` Map maintains the relationship between generated tool_call_ids\n+ * and function names throughout the conversation. This is necessary because:\n+ * - Gemini function calls don't have IDs, but OpenAI tool calls require them\n+ * - We generate IDs when translating function calls to tool calls\n+ * - Later function responses need to reference these IDs via tool_call_id\n+ *\n+ * Tool Call Matching Strategy:\n+ * - When a function call is encountered, generate a tool_call_id and store it in pendingToolCalls\n+ * - When a function response is encountered, look up the corresponding tool_call_id by function name\n+ * - After matching, remove the tool_call_id from pendingToolCalls to prevent duplicate matches\n+ *\n+ * Special Cases:\n+ * - Nested array format: Gemini CLI sometimes sends function responses as `Array<{functionResponse: ...}>`\n+ *   instead of inside GeminiContent.parts. We detect and handle this format separately.\n+ * - Incomplete tool calls: Assistant messages with tool calls that have no corresponding responses\n+ *   are filtered out during the cleanup phase to avoid OpenAI API errors.\n+ *\n+ * @param contents - Array of Gemini conversation contents (may include nested arrays for function responses)\n+ * @param systemInstruction - Optional system instruction to prepend to the conversation\n+ * @returns Array of OpenAI-compatible messages\n+ */\n+function translateGeminiContentsToOpenAI(\n+  contents: Array<\n+    | GeminiContent\n+    | Array<{\n+        functionResponse: { id?: string; name: string; response: unknown }\n+      }>\n+  >,\n+  systemInstruction?: GeminiContent,\n+): Array<Message> {\n+  const messages: Array<Message> = []\n+  const pendingToolCalls = new Map<string, string>() // tool_call_id -> function_name\n+\n+  // Add system instruction first if present\n+  if (systemInstruction) {\n+    const systemText = extractTextFromGeminiContent(systemInstruction)\n+    if (systemText) {\n+      messages.push({ role: \"system\", content: systemText })",
+        "path": "src/routes/generate-content/translation.ts",
+        "commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "original_commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "[nitpick] System instruction translation only preserves text parts; any non-text parts (e.g. inlineData or functionCall) are silently dropped, leading to potential loss of contextual instructions if richer content is provided. If the Gemini spec allows non-text systemInstruction parts, incorporate them (similar to translateGeminiContentToOpenAI) or explicitly validate and reject unsupported part types.\n```suggestion\n    // Check for non-text parts in systemInstruction\n    const nonTextParts = systemInstruction.parts.filter(\n      (part) => !(\"text\" in part)\n    );\n    if (nonTextParts.length > 0) {\n      throw new Error(\n        `System instruction contains unsupported non-text part(s): ${nonTextParts\n          .map((part) => Object.keys(part).join(\",\"))\n          .join(\"; \")}`\n      );\n    }\n    const systemText = extractTextFromGeminiContent(systemInstruction);\n    if (systemText) {\n      messages.push({ role: \"system\", content: systemText });\n```",
+        "created_at": "2025-10-04T13:58:56Z",
+        "updated_at": "2025-10-04T13:58:58Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986395",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986395"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986395"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986395/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": 336,
+        "original_start_line": 336,
+        "start_side": "RIGHT",
+        "line": 338,
+        "original_line": 338,
+        "side": "RIGHT",
+        "original_position": 338,
+        "position": 338,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986399",
+        "pull_request_review_id": 3301886195,
+        "id": 2403986399,
+        "node_id": "PRRC_kwDONot0Ic6PSevf",
+        "diff_hunk": "@@ -0,0 +1,67 @@\n+import { Hono } from \"hono\"\n+\n+import { forwardError } from \"~/lib/error\"\n+\n+import {\n+  handleGeminiGeneration,\n+  handleGeminiStreamGeneration,\n+  handleGeminiCountTokens,\n+} from \"./handler\"\n+\n+function isStreamGenerate(url: string): boolean {\n+  return url.includes(\":streamGenerateContent\")\n+}\n+function isCountTokens(url: string): boolean {\n+  return url.includes(\":countTokens\")\n+}\n+function isGenerate(url: string): boolean {\n+  return (\n+    url.includes(\":generateContent\") && !url.includes(\":streamGenerateContent\")\n+  )\n+}\n+\n+const router = new Hono()\n+\n+// Streaming generation endpoint\n+// POST /v1beta/models/{model}:streamGenerateContent\n+router.post(\"/v1beta/models/*\", async (c, next) => {\n+  const url = c.req.url\n+  if (isStreamGenerate(url)) {\n+    try {\n+      return await handleGeminiStreamGeneration(c)\n+    } catch (error) {\n+      return await forwardError(c, error)\n+    }\n+  }\n+  await next()\n+})\n+\n+// Token counting endpoint\n+// POST /v1beta/models/{model}:countTokens\n+router.post(\"/v1beta/models/*\", async (c, next) => {\n+  const url = c.req.url\n+  if (isCountTokens(url)) {\n+    try {\n+      return await handleGeminiCountTokens(c)\n+    } catch (error) {\n+      return await forwardError(c, error)\n+    }\n+  }\n+  await next()\n+})\n+\n+// Standard generation endpoint\n+// POST /v1beta/models/{model}:generateContent\n+router.post(\"/v1beta/models/*\", async (c, next) => {\n+  const url = c.req.url\n+  if (isGenerate(url)) {\n+    try {\n+      return await handleGeminiGeneration(c)\n+    } catch (error) {\n+      return await forwardError(c, error)\n+    }",
+        "path": "src/routes/generate-content/route.ts",
+        "commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "original_commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "[nitpick] Three sequential route handlers are registered for the identical path pattern '/v1beta/models/*', each performing string inclusion checks. This stacks middleware passes and can be consolidated into a single handler that branches internally, reducing overhead and centralizing the dispatch logic.\n```suggestion\n// Consolidated handler for /v1beta/models/*\n// Dispatches to the correct logic based on the URL suffix\nrouter.post(\"/v1beta/models/*\", async (c, next) => {\n  const url = c.req.url\n  try {\n    if (isStreamGenerate(url)) {\n      return await handleGeminiStreamGeneration(c)\n    } else if (isCountTokens(url)) {\n      return await handleGeminiCountTokens(c)\n    } else if (isGenerate(url)) {\n      return await handleGeminiGeneration(c)\n    }\n  } catch (error) {\n    return await forwardError(c, error)\n```",
+        "created_at": "2025-10-04T13:58:56Z",
+        "updated_at": "2025-10-04T13:58:59Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986399",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986399"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986399"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986399/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": 25,
+        "original_start_line": 25,
+        "start_side": "RIGHT",
+        "line": 62,
+        "original_line": 62,
+        "side": "RIGHT",
+        "original_position": 62,
+        "position": 62,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986401",
+        "pull_request_review_id": 3301886195,
+        "id": 2403986401,
+        "node_id": "PRRC_kwDONot0Ic6PSevh",
+        "diff_hunk": "@@ -0,0 +1,67 @@\n+import { Hono } from \"hono\"\n+\n+import { forwardError } from \"~/lib/error\"\n+\n+import {\n+  handleGeminiGeneration,\n+  handleGeminiStreamGeneration,\n+  handleGeminiCountTokens,\n+} from \"./handler\"\n+\n+function isStreamGenerate(url: string): boolean {\n+  return url.includes(\":streamGenerateContent\")\n+}\n+function isCountTokens(url: string): boolean {\n+  return url.includes(\":countTokens\")\n+}\n+function isGenerate(url: string): boolean {\n+  return (\n+    url.includes(\":generateContent\") && !url.includes(\":streamGenerateContent\")\n+  )\n+}\n+\n+const router = new Hono()\n+\n+// Streaming generation endpoint\n+// POST /v1beta/models/{model}:streamGenerateContent\n+router.post(\"/v1beta/models/*\", async (c, next) => {\n+  const url = c.req.url\n+  if (isStreamGenerate(url)) {\n+    try {\n+      return await handleGeminiStreamGeneration(c)\n+    } catch (error) {\n+      return await forwardError(c, error)\n+    }\n+  }\n+  await next()\n+})\n+\n+// Token counting endpoint\n+// POST /v1beta/models/{model}:countTokens\n+router.post(\"/v1beta/models/*\", async (c, next) => {\n+  const url = c.req.url\n+  if (isCountTokens(url)) {\n+    try {\n+      return await handleGeminiCountTokens(c)\n+    } catch (error) {\n+      return await forwardError(c, error)\n+    }\n+  }\n+  await next()\n+})\n+\n+// Standard generation endpoint\n+// POST /v1beta/models/{model}:generateContent\n+router.post(\"/v1beta/models/*\", async (c, next) => {\n+  const url = c.req.url\n+  if (isGenerate(url)) {\n+    try {\n+      return await handleGeminiGeneration(c)\n+    } catch (error) {\n+      return await forwardError(c, error)\n+    }\n+  }\n+  await next()",
+        "path": "src/routes/generate-content/route.ts",
+        "commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "original_commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "[nitpick] Three sequential route handlers are registered for the identical path pattern '/v1beta/models/*', each performing string inclusion checks. This stacks middleware passes and can be consolidated into a single handler that branches internally, reducing overhead and centralizing the dispatch logic.\n```suggestion\n// Consolidated handler for all /v1beta/models/* endpoints\n// POST /v1beta/models/{model}:streamGenerateContent\n// POST /v1beta/models/{model}:countTokens\n// POST /v1beta/models/{model}:generateContent\nrouter.post(\"/v1beta/models/*\", async (c) => {\n  const url = c.req.url\n  try {\n    if (isStreamGenerate(url)) {\n      return await handleGeminiStreamGeneration(c)\n    } else if (isCountTokens(url)) {\n      return await handleGeminiCountTokens(c)\n    } else if (isGenerate(url)) {\n      return await handleGeminiGeneration(c)\n    } else {\n      // If none match, return 404\n      return c.text(\"Not Found\", 404)\n    }\n  } catch (error) {\n    return await forwardError(c, error)\n  }\n```",
+        "created_at": "2025-10-04T13:58:57Z",
+        "updated_at": "2025-10-04T13:58:59Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986401",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986401"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986401"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986401/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": 25,
+        "original_start_line": 25,
+        "start_side": "RIGHT",
+        "line": 64,
+        "original_line": 64,
+        "side": "RIGHT",
+        "original_position": 64,
+        "position": 64,
+        "subject_type": "line"
+    },
+    {
+        "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986406",
+        "pull_request_review_id": 3301886195,
+        "id": 2403986406,
+        "node_id": "PRRC_kwDONot0Ic6PSevm",
+        "diff_hunk": "@@ -0,0 +1,67 @@\n+import { Hono } from \"hono\"\n+\n+import { forwardError } from \"~/lib/error\"\n+\n+import {\n+  handleGeminiGeneration,\n+  handleGeminiStreamGeneration,\n+  handleGeminiCountTokens,\n+} from \"./handler\"\n+\n+function isStreamGenerate(url: string): boolean {\n+  return url.includes(\":streamGenerateContent\")\n+}\n+function isCountTokens(url: string): boolean {\n+  return url.includes(\":countTokens\")\n+}\n+function isGenerate(url: string): boolean {\n+  return (\n+    url.includes(\":generateContent\") && !url.includes(\":streamGenerateContent\")\n+  )\n+}\n+\n+const router = new Hono()\n+\n+// Streaming generation endpoint\n+// POST /v1beta/models/{model}:streamGenerateContent\n+router.post(\"/v1beta/models/*\", async (c, next) => {\n+  const url = c.req.url\n+  if (isStreamGenerate(url)) {\n+    try {\n+      return await handleGeminiStreamGeneration(c)\n+    } catch (error) {\n+      return await forwardError(c, error)\n+    }\n+  }\n+  await next()\n+})\n+\n+// Token counting endpoint\n+// POST /v1beta/models/{model}:countTokens\n+router.post(\"/v1beta/models/*\", async (c, next) => {\n+  const url = c.req.url\n+  if (isCountTokens(url)) {\n+    try {\n+      return await handleGeminiCountTokens(c)\n+    } catch (error) {\n+      return await forwardError(c, error)\n+    }\n+  }\n+  await next()\n+})\n+\n+// Standard generation endpoint\n+// POST /v1beta/models/{model}:generateContent\n+router.post(\"/v1beta/models/*\", async (c, next) => {\n+  const url = c.req.url\n+  if (isGenerate(url)) {\n+    try {\n+      return await handleGeminiGeneration(c)\n+    } catch (error) {\n+      return await forwardError(c, error)\n+    }\n+  }\n+  await next()",
+        "path": "src/routes/generate-content/route.ts",
+        "commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "original_commit_id": "e1a5b3b6fcc4d85f75fca00e3753a59e04192fd9",
+        "user": {
+            "login": "Copilot",
+            "id": 175728472,
+            "node_id": "BOT_kgDOCnlnWA",
+            "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+            "gravatar_id": "",
+            "url": "https://api.github.com/users/Copilot",
+            "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+            "followers_url": "https://api.github.com/users/Copilot/followers",
+            "following_url": "https://api.github.com/users/Copilot/following{/other_user}",
+            "gists_url": "https://api.github.com/users/Copilot/gists{/gist_id}",
+            "starred_url": "https://api.github.com/users/Copilot/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/Copilot/subscriptions",
+            "organizations_url": "https://api.github.com/users/Copilot/orgs",
+            "repos_url": "https://api.github.com/users/Copilot/repos",
+            "events_url": "https://api.github.com/users/Copilot/events{/privacy}",
+            "received_events_url": "https://api.github.com/users/Copilot/received_events",
+            "type": "Bot",
+            "user_view_type": "public",
+            "site_admin": false
+        },
+        "body": "[nitpick] Three sequential route handlers are registered for the identical path pattern '/v1beta/models/*', each performing string inclusion checks. This stacks middleware passes and can be consolidated into a single handler that branches internally, reducing overhead and centralizing the dispatch logic.\n```suggestion\n// Consolidated generation endpoints\n// POST /v1beta/models/{model}:streamGenerateContent\n// POST /v1beta/models/{model}:countTokens\n// POST /v1beta/models/{model}:generateContent\nrouter.post(\"/v1beta/models/*\", async (c) => {\n  const url = c.req.url\n  try {\n    if (isStreamGenerate(url)) {\n      return await handleGeminiStreamGeneration(c)\n    } else if (isCountTokens(url)) {\n      return await handleGeminiCountTokens(c)\n    } else if (isGenerate(url)) {\n      return await handleGeminiGeneration(c)\n    } else {\n      // If none match, return 404 or appropriate error\n      return c.text(\"Not Found\", 404)\n    }\n  } catch (error) {\n    return await forwardError(c, error)\n  }\n```",
+        "created_at": "2025-10-04T13:58:57Z",
+        "updated_at": "2025-10-04T13:58:59Z",
+        "html_url": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986406",
+        "pull_request_url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122",
+        "author_association": "CONTRIBUTOR",
+        "_links": {
+            "self": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986406"
+            },
+            "html": {
+                "href": "https://github.com/ericc-ch/copilot-api/pull/122#discussion_r2403986406"
+            },
+            "pull_request": {
+                "href": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/122"
+            }
+        },
+        "reactions": {
+            "url": "https://api.github.com/repos/ericc-ch/copilot-api/pulls/comments/2403986406/reactions",
+            "total_count": 0,
+            "+1": 0,
+            "-1": 0,
+            "laugh": 0,
+            "hooray": 0,
+            "confused": 0,
+            "heart": 0,
+            "rocket": 0,
+            "eyes": 0
+        },
+        "start_line": 25,
+        "original_start_line": 25,
+        "start_side": "RIGHT",
+        "line": 64,
+        "original_line": 64,
+        "side": "RIGHT",
+        "original_position": 64,
+        "position": 64,
+        "subject_type": "line"
+    }
+]
