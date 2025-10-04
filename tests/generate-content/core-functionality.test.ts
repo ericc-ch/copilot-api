@@ -27,7 +27,21 @@ test("translates request and uses local tokenizer without downstream call", asyn
     },
   }))
   await mock.module("~/lib/tokenizer", () => ({
-    getTokenCount: (_messages: unknown) => ({ input: 2, output: 3 }),
+    getTokenCount: async (_messages: unknown, _model: unknown) =>
+      Promise.resolve({ input: 2, output: 3 }),
+  }))
+  await mock.module("~/lib/state", () => ({
+    state: {
+      models: {
+        data: [
+          {
+            id: "gemini-pro",
+            name: "Gemini Pro",
+            capabilities: { tokenizer: "o200k_base" },
+          },
+        ],
+      },
+    },
   }))
 
   const { server } = (await import("~/server")) as { server: TestServer }
