@@ -14,7 +14,6 @@ import {
   type ContentPart,
   type Message,
   type Tool,
-  type ToolCall,
 } from "~/services/copilot/create-chat-completions"
 
 import {
@@ -86,6 +85,34 @@ export function translateGeminiToOpenAI(
   return result
 }
 
+// Helper function to match function name to tool call ID and emit tool response
+function matchAndEmitToolResponse(options: {
+  functionName: string
+  functionResponse: unknown
+  pendingToolCalls: Map<string, string>
+  messages: Array<Message>
+}): void {
+  const { functionName, functionResponse, pendingToolCalls, messages } = options
+
+  // Find tool call ID by searching through the map
+  let matchedToolCallId: string | undefined
+  for (const [toolCallId, mappedFunctionName] of pendingToolCalls.entries()) {
+    if (mappedFunctionName === functionName) {
+      matchedToolCallId = toolCallId
+      break
+    }
+  }
+
+  if (matchedToolCallId) {
+    messages.push({
+      role: "tool",
+      tool_call_id: matchedToolCallId,
+      content: JSON.stringify(functionResponse),
+    })
+    pendingToolCalls.delete(matchedToolCallId)
+  }
+}
+
 // Helper function to process function response arrays
 function processFunctionResponseArray(
   responseArray: Array<{
@@ -96,46 +123,14 @@ function processFunctionResponseArray(
 ): void {
   for (const responseItem of responseArray) {
     if ("functionResponse" in responseItem) {
-      const functionName = responseItem.functionResponse.name
-      // Find tool call ID by searching through the map
-      let matchedToolCallId: string | undefined
-      for (const [
-        toolCallId,
-        mappedFunctionName,
-      ] of pendingToolCalls.entries()) {
-        if (mappedFunctionName === functionName) {
-          matchedToolCallId = toolCallId
-          break
-        }
-      }
-      if (matchedToolCallId) {
-        messages.push({
-          role: "tool",
-          tool_call_id: matchedToolCallId,
-          content: JSON.stringify(responseItem.functionResponse.response),
-        })
-        pendingToolCalls.delete(matchedToolCallId)
-      }
+      matchAndEmitToolResponse({
+        functionName: responseItem.functionResponse.name,
+        functionResponse: responseItem.functionResponse.response,
+        pendingToolCalls,
+        messages,
+      })
     }
   }
-}
-
-// Helper function to check if tool calls have corresponding tool responses
-function hasCorrespondingToolResponses(
-  messages: Array<Message>,
-  toolCalls: Array<ToolCall>,
-): boolean {
-  const toolCallIds = new Set(toolCalls.map((call) => call.id))
-
-  // Look for tool messages that respond to these tool calls
-  for (const message of messages) {
-    if (message.role === "tool" && message.tool_call_id) {
-      toolCallIds.delete(message.tool_call_id)
-    }
-  }
-
-  // If any tool call ID remains, it means there's no corresponding response
-  return toolCallIds.size === 0
 }
 
 // Helper function to process function responses in content
@@ -145,23 +140,12 @@ function processFunctionResponses(
   messages: Array<Message>,
 ): void {
   for (const funcResponse of functionResponses) {
-    const functionName = funcResponse.functionResponse.name
-    // Find tool call ID by searching through the map
-    let matchedToolCallId: string | undefined
-    for (const [toolCallId, mappedFunctionName] of pendingToolCalls.entries()) {
-      if (mappedFunctionName === functionName) {
-        matchedToolCallId = toolCallId
-        break
-      }
-    }
-    if (matchedToolCallId) {
-      messages.push({
-        role: "tool",
-        tool_call_id: matchedToolCallId,
-        content: JSON.stringify(funcResponse.functionResponse.response),
-      })
-      pendingToolCalls.delete(matchedToolCallId)
-    }
+    matchAndEmitToolResponse({
+      functionName: funcResponse.functionResponse.name,
+      functionResponse: funcResponse.functionResponse.response,
+      pendingToolCalls,
+      messages,
+    })
   }
 }
 
@@ -237,29 +221,6 @@ function canMergeMessages(
   )
 }
 
-// Helper function to check if message should be skipped
-function shouldSkipMessage(
-  message: Message,
-  messages: Array<Message>,
-  seenToolCallIds: Set<string>,
-): boolean {
-  // Skip incomplete assistant messages with tool calls that have no responses
-  if (
-    message.role === "assistant"
-    && message.tool_calls
-    && !hasCorrespondingToolResponses(messages, message.tool_calls)
-  ) {
-    return true
-  }
-
-  // Skip duplicate tool responses
-  if (isDuplicateToolResponse(message, seenToolCallIds)) {
-    return true
-  }
-
-  return false
-}
-
 // Helper function to process and add message to cleaned array
 function processAndAddMessage(
   message: Message,
@@ -295,8 +256,28 @@ function cleanupMessages(messages: Array<Message>): Array<Message> {
   const cleanedMessages: Array<Message> = []
   const seenToolCallIds = new Set<string>()
 
+  // Pre-build a set of all tool_call_ids that have tool responses (O(n))
+  const toolCallIdsWithResponses = new Set<string>()
   for (const message of messages) {
-    if (shouldSkipMessage(message, messages, seenToolCallIds)) {
+    if (message.role === "tool" && message.tool_call_id) {
+      toolCallIdsWithResponses.add(message.tool_call_id)
+    }
+  }
+
+  for (const message of messages) {
+    // Skip incomplete assistant messages with tool calls that have no responses
+    if (message.role === "assistant" && message.tool_calls) {
+      // Check if all tool calls have responses
+      const hasAllResponses = message.tool_calls.every((call) =>
+        toolCallIdsWithResponses.has(call.id),
+      )
+      if (!hasAllResponses) {
+        continue
+      }
+    }
+
+    // Skip duplicate tool responses
+    if (isDuplicateToolResponse(message, seenToolCallIds)) {
       continue
     }
 
@@ -306,6 +287,38 @@ function cleanupMessages(messages: Array<Message>): Array<Message> {
   return cleanedMessages
 }
 
+/**
+ * Translates Gemini conversation contents to OpenAI message format.
+ *
+ * This function handles complex transformations including:
+ * - Converting Gemini "model" role to OpenAI "assistant" role
+ * - Processing tool calls (function calls) and their responses
+ * - Managing tool call ID mapping through pendingToolCalls Map
+ * - Handling special nested array format for function responses (Gemini CLI compatibility)
+ * - Cleaning up incomplete tool calls and deduplicating tool responses
+ *
+ * @remarks
+ * The `pendingToolCalls` Map maintains the relationship between generated tool_call_ids
+ * and function names throughout the conversation. This is necessary because:
+ * - Gemini function calls don't have IDs, but OpenAI tool calls require them
+ * - We generate IDs when translating function calls to tool calls
+ * - Later function responses need to reference these IDs via tool_call_id
+ *
+ * Tool Call Matching Strategy:
+ * - When a function call is encountered, generate a tool_call_id and store it in pendingToolCalls
+ * - When a function response is encountered, look up the corresponding tool_call_id by function name
+ * - After matching, remove the tool_call_id from pendingToolCalls to prevent duplicate matches
+ *
+ * Special Cases:
+ * - Nested array format: Gemini CLI sometimes sends function responses as `Array<{functionResponse: ...}>`
+ *   instead of inside GeminiContent.parts. We detect and handle this format separately.
+ * - Incomplete tool calls: Assistant messages with tool calls that have no corresponding responses
+ *   are filtered out during the cleanup phase to avoid OpenAI API errors.
+ *
+ * @param contents - Array of Gemini conversation contents (may include nested arrays for function responses)
+ * @param systemInstruction - Optional system instruction to prepend to the conversation
+ * @returns Array of OpenAI-compatible messages
+ */
 function translateGeminiContentsToOpenAI(
   contents: Array<
     | GeminiContent
@@ -489,13 +502,25 @@ function translateOpenAIMessageToGeminiContent(
       parts.push({
         functionCall: {
           name: toolCall.function.name,
-          args:
-            toolCall.function.arguments ?
-              (JSON.parse(toolCall.function.arguments) as Record<
-                string,
-                unknown
-              >)
-            : {},
+          args: (() => {
+            if (toolCall.function.arguments) {
+              try {
+                return JSON.parse(toolCall.function.arguments) as Record<
+                  string,
+                  unknown
+                >
+              } catch (error) {
+                if (process.env.DEBUG_GEMINI_REQUESTS === "true") {
+                  console.warn(
+                    `[DEBUG] Failed to parse toolCall.function.arguments: "${toolCall.function.arguments}". Error:`,
+                    error,
+                  )
+                }
+                return {}
+              }
+            }
+            return {}
+          })(),
         },
       })
     }
