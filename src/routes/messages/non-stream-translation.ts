@@ -41,7 +41,7 @@ export function translateToOpenAI(
     temperature: payload.temperature,
     top_p: payload.top_p,
     user: payload.metadata?.user_id,
-    tools: translateAnthropicToolsToOpenAI(payload.tools),
+    tools: translateAnthropicToolsToOpenAI(payload.tools, payload.model),
     tool_choice: translateAnthropicToolChoiceToOpenAI(payload.tool_choice),
   }
 }
@@ -230,18 +230,21 @@ function mapContent(
 
 function translateAnthropicToolsToOpenAI(
   anthropicTools: Array<AnthropicTool> | undefined,
+  model: string,
 ): Array<Tool> | undefined {
   if (!anthropicTools) {
     return undefined
   }
-  return anthropicTools.map((tool) => ({
-    type: "function",
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.input_schema,
-    },
-  }))
+  return anthropicTools
+    .filter((tool) => tool.name.length <= 64 || !model.startsWith("gpt-")) // OpenAI limits function names to 64 chars
+    .map((tool) => ({
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.input_schema,
+      },
+    }))
 }
 
 function translateAnthropicToolChoiceToOpenAI(
