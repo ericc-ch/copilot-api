@@ -1,98 +1,46 @@
 import { afterEach, expect, test, mock } from "bun:test"
 
-import type { CapturedPayload } from "./test-types"
-
-import { makeRequest } from "./_test-utils"
+import {
+  makeRequest,
+  setupPayloadCapture,
+  expectToolCleanup,
+  GEMINI_PRO_URL,
+} from "./_test-utils"
 
 afterEach(() => {
   mock.restore()
 })
 
-test("processes toolConfig AUTO/ANY/NONE mapping end-to-end", async () => {
-  let capturedPayload: CapturedPayload = {} as CapturedPayload
-  await mock.module("~/services/copilot/create-chat-completions", () => ({
-    createChatCompletions: (payload: CapturedPayload) => {
-      capturedPayload = payload
-      return {
-        id: "x",
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: "ok" },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }
-    },
-  }))
+test.each([
+  ["AUTO", "auto"],
+  ["ANY", "required"],
+  ["NONE", "none"],
+])(
+  "processes toolConfig %s mapping to %s end-to-end",
+  async (inputMode, expectedChoice) => {
+    const capturedPayload = await setupPayloadCapture()
 
-  // toolConfig requires tools to be processed, so add tools to request
-  const baseRequest = {
-    tools: [
-      {
-        functionDeclarations: [
-          { name: "test", parameters: { type: "object" } },
-        ],
-      },
-    ],
-    contents: [{ role: "user", parts: [{ text: "hi" }] }],
-  }
+    const res = await makeRequest(GEMINI_PRO_URL, {
+      tools: [
+        {
+          functionDeclarations: [
+            { name: "test", parameters: { type: "object" } },
+          ],
+        },
+      ],
+      toolConfig: { functionCallingConfig: { mode: inputMode } },
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    })
 
-  // Test AUTO -> auto
-  const autoRes = await makeRequest(
-    "/v1beta/models/gemini-pro:generateContent",
-    {
-      ...baseRequest,
-      toolConfig: { functionCallingConfig: { mode: "AUTO" } },
-    },
-  )
-  expect(autoRes.status).toBe(200)
-  expect(capturedPayload.tool_choice).toBe("auto")
-
-  // Test ANY -> required
-  const anyRes = await makeRequest(
-    "/v1beta/models/gemini-pro:generateContent",
-    {
-      ...baseRequest,
-      toolConfig: { functionCallingConfig: { mode: "ANY" } },
-    },
-  )
-  expect(anyRes.status).toBe(200)
-  expect(capturedPayload.tool_choice).toBe("required")
-
-  // Test NONE -> none
-  const noneRes = await makeRequest(
-    "/v1beta/models/gemini-pro:generateContent",
-    {
-      ...baseRequest,
-      toolConfig: { functionCallingConfig: { mode: "NONE" } },
-    },
-  )
-  expect(noneRes.status).toBe(200)
-  expect(capturedPayload.tool_choice).toBe("none")
-})
+    expect(res.status).toBe(200)
+    expect(capturedPayload.tool_choice).toBe(expectedChoice)
+  },
+)
 
 test("handles urlContext tool filtering in request", async () => {
-  let capturedPayload: CapturedPayload = {} as CapturedPayload
-  await mock.module("~/services/copilot/create-chat-completions", () => ({
-    createChatCompletions: (payload: CapturedPayload) => {
-      capturedPayload = payload
-      return {
-        id: "x",
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: "ok" },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }
-    },
-  }))
+  const capturedPayload = await setupPayloadCapture()
 
-  const res = await makeRequest("/v1beta/models/gemini-pro:generateContent", {
+  const res = await makeRequest(GEMINI_PRO_URL, {
     tools: [
       { urlContext: {} },
       {
@@ -106,33 +54,22 @@ test("handles urlContext tool filtering in request", async () => {
 
   expect(res.status).toBe(200)
   expect(capturedPayload.tools).toBeDefined()
+
+  // Verify urlContext is filtered out, readFile is retained
   const toolNames = new Set(
     capturedPayload.tools?.map((t) => t.function.name) ?? [],
   )
   expect(toolNames.has("readFile")).toBe(true)
   expect(toolNames.has("urlContext")).toBe(false)
+
+  // Verify no empty function names remain after filtering
+  expectToolCleanup(capturedPayload, { noEmptyFunctions: true })
 })
 
 test("synthesizes tools from function calls when tools not provided", async () => {
-  let capturedPayload: CapturedPayload = {} as CapturedPayload
-  await mock.module("~/services/copilot/create-chat-completions", () => ({
-    createChatCompletions: (payload: CapturedPayload) => {
-      capturedPayload = payload
-      return {
-        id: "x",
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: "ok" },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }
-    },
-  }))
+  const capturedPayload = await setupPayloadCapture()
 
-  const res = await makeRequest("/v1beta/models/gemini-pro:generateContent", {
+  const res = await makeRequest(GEMINI_PRO_URL, {
     contents: [
       { role: "user", parts: [{ text: "Do a web search" }] },
       {
@@ -146,28 +83,18 @@ test("synthesizes tools from function calls when tools not provided", async () =
   expect(capturedPayload.tools).toBeDefined()
   const toolNames = capturedPayload.tools?.map((t) => t.function.name) ?? []
   expect(toolNames.includes("search")).toBe(true)
+
+  // Verify synthesized tools have no duplicates and no empty names
+  expectToolCleanup(capturedPayload, {
+    noDuplicates: true,
+    noEmptyFunctions: true,
+  })
 })
 
 test("handles same-role message merging behavior", async () => {
-  let capturedPayload: CapturedPayload = {} as CapturedPayload
-  await mock.module("~/services/copilot/create-chat-completions", () => ({
-    createChatCompletions: (payload: CapturedPayload) => {
-      capturedPayload = payload
-      return {
-        id: "x",
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: "ok" },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }
-    },
-  }))
+  const capturedPayload = await setupPayloadCapture()
 
-  const res = await makeRequest("/v1beta/models/gemini-pro:generateContent", {
+  const res = await makeRequest(GEMINI_PRO_URL, {
     contents: [
       { role: "user", parts: [{ text: "Hello." }] },
       { role: "user", parts: [{ text: "How are you?" }] },
@@ -183,25 +110,9 @@ test("handles same-role message merging behavior", async () => {
 })
 
 test("handles incomplete tool calls cleanup", async () => {
-  let capturedPayload: CapturedPayload = {} as CapturedPayload
-  await mock.module("~/services/copilot/create-chat-completions", () => ({
-    createChatCompletions: (payload: CapturedPayload) => {
-      capturedPayload = payload
-      return {
-        id: "x",
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: "ok" },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }
-    },
-  }))
+  const capturedPayload = await setupPayloadCapture()
 
-  const res = await makeRequest("/v1beta/models/gemini-pro:generateContent", {
+  const res = await makeRequest(GEMINI_PRO_URL, {
     contents: [
       { role: "user", parts: [{ text: "Search for cats." }] },
       {
@@ -222,25 +133,9 @@ test("handles incomplete tool calls cleanup", async () => {
 })
 
 test("handles system instruction in contents", async () => {
-  let capturedPayload: CapturedPayload = {} as CapturedPayload
-  await mock.module("~/services/copilot/create-chat-completions", () => ({
-    createChatCompletions: (payload: CapturedPayload) => {
-      capturedPayload = payload
-      return {
-        id: "x",
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: "ok" },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }
-    },
-  }))
+  const capturedPayload = await setupPayloadCapture()
 
-  const res = await makeRequest("/v1beta/models/gemini-pro:generateContent", {
+  const res = await makeRequest(GEMINI_PRO_URL, {
     systemInstruction: { parts: [{ text: "You are a helpful assistant" }] },
     contents: [{ role: "user", parts: [{ text: "hi" }] }],
   })
@@ -260,7 +155,7 @@ test("handles empty contents gracefully", async () => {
     },
   }))
 
-  const res = await makeRequest("/v1beta/models/gemini-pro:generateContent", {
+  const res = await makeRequest(GEMINI_PRO_URL, {
     contents: [],
   })
 
@@ -269,25 +164,9 @@ test("handles empty contents gracefully", async () => {
 })
 
 test("handles complex tool call workflow", async () => {
-  let capturedPayload: CapturedPayload = {} as CapturedPayload
-  await mock.module("~/services/copilot/create-chat-completions", () => ({
-    createChatCompletions: (payload: CapturedPayload) => {
-      capturedPayload = payload
-      return {
-        id: "x",
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: "ok" },
-            finish_reason: "stop",
-          },
-        ],
-        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-      }
-    },
-  }))
+  const capturedPayload = await setupPayloadCapture()
 
-  const res = await makeRequest("/v1beta/models/gemini-pro:generateContent", {
+  const res = await makeRequest(GEMINI_PRO_URL, {
     contents: [
       { role: "user", parts: [{ text: "Read a file" }] },
       {

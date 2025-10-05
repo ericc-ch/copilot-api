@@ -1,19 +1,6 @@
 import { afterEach, expect, test, mock } from "bun:test"
 
-function asyncIterableFrom(events: Array<{ data?: string }>) {
-  return {
-    [Symbol.asyncIterator]() {
-      let i = 0
-      return {
-        next() {
-          if (i < events.length)
-            return Promise.resolve({ value: events[i++], done: false })
-          return Promise.resolve({ value: undefined, done: true })
-        },
-      }
-    },
-  }
-}
+import { asyncIterableFrom, expectSSEContains } from "./_test-utils"
 
 afterEach(() => {
   mock.restore()
@@ -75,11 +62,13 @@ test("[Stream] handles complete tool call parameters in single chunk", async () 
 
   expect(res.status).toBe(200)
   const body = await res.text()
-  expect(
-    body.includes(
-      '"functionCall":{"name":"ReadFile","args":{"absolute_path":"/path/to/file.txt"}}',
-    ),
-  ).toBe(true)
+  expectSSEContains(body, {
+    toolCall: {
+      name: "ReadFile",
+      completeArgs: true,
+    },
+    jsonContains: '"absolute_path":"/path/to/file.txt"',
+  })
 })
 
 test("[Stream] handles fragmented tool call parameters across multiple chunks", async () => {
@@ -156,11 +145,13 @@ test("[Stream] handles fragmented tool call parameters across multiple chunks", 
 
   expect(res.status).toBe(200)
   const body = await res.text()
-  expect(
-    body.includes(
-      '"functionCall":{"name":"ReadFile","args":{"absolute_path":"/file.txt"}}',
-    ),
-  ).toBe(true)
+  expectSSEContains(body, {
+    toolCall: {
+      name: "ReadFile",
+      completeArgs: true,
+    },
+    jsonContains: '"absolute_path":"/file.txt"',
+  })
 })
 
 test("[Stream] correctly processes multiple concurrent tool calls", async () => {
@@ -227,14 +218,18 @@ test("[Stream] correctly processes multiple concurrent tool calls", async () => 
 
   expect(res.status).toBe(200)
   const body = await res.text()
-  expect(
-    body.includes(
-      '"functionCall":{"name":"ReadFile","args":{"path":"/read.txt"}}',
-    ),
-  ).toBe(true)
-  expect(
-    body.includes(
-      '"functionCall":{"name":"WriteFile","args":{"path":"/write.txt","content":"data"}}',
-    ),
-  ).toBe(true)
+  expectSSEContains(body, {
+    toolCall: {
+      name: "ReadFile",
+      completeArgs: true,
+    },
+    jsonContains: '"path":"/read.txt"',
+  })
+  expectSSEContains(body, {
+    toolCall: {
+      name: "WriteFile",
+      completeArgs: true,
+    },
+    jsonContains: '"path":"/write.txt"',
+  })
 })

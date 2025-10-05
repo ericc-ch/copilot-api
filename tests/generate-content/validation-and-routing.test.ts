@@ -4,6 +4,7 @@ import {
   asyncIterableFrom,
   createMockRateLimit,
   makeRequest,
+  expectSSEContains,
 } from "./_test-utils"
 
 afterEach(() => {
@@ -121,9 +122,10 @@ test("streams fallback response when no text content in non-streaming to streami
 
   const body = await res.text()
 
-  expect(body.includes("data:")).toBe(true)
-  expect(body.includes('"candidates"')).toBe(true)
-  expect(body.includes('"usageMetadata"')).toBe(true)
+  expectSSEContains(body, {
+    jsonContains: '"candidates"',
+    usageMetadata: true,
+  })
 })
 
 test("non-stream endpoint rejects streaming response with 500", async () => {
@@ -203,7 +205,7 @@ test("handles HTTP errors with proper error codes", async () => {
     contents: [{ role: "user", parts: [{ text: "hi" }] }],
   })
 
-  // 由于错误处理机制，HTTP错误也会转为500
+  // HTTP errors are converted to 500 by the error handling middleware
   expect(res.status).toBe(500)
   const json = (await res.json()) as {
     error: { message: string; type: string }

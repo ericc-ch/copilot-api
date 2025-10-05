@@ -1,19 +1,6 @@
 import { afterEach, expect, test, mock } from "bun:test"
 
-function asyncIterableFrom(events: Array<{ data?: string }>) {
-  return {
-    [Symbol.asyncIterator]() {
-      let i = 0
-      return {
-        next() {
-          if (i < events.length)
-            return Promise.resolve({ value: events[i++], done: false })
-          return Promise.resolve({ value: undefined, done: true })
-        },
-      }
-    },
-  }
-}
+import { asyncIterableFrom, expectSSEContains } from "./_test-utils"
 
 afterEach(() => {
   mock.restore()
@@ -60,8 +47,9 @@ test("routes to stream endpoint based on URL keyword", async () => {
   const ct = res.headers.get("content-type") || ""
   expect(ct.includes("text/event-stream")).toBe(true)
   const body = await res.text()
-  expect(body.includes("data:")).toBe(true)
-  expect(body.includes('"role":"model"')).toBe(true)
+  expectSSEContains(body, {
+    jsonContains: '"role":"model"',
+  })
 })
 
 test("routes to countTokens endpoint based on URL keyword", async () => {

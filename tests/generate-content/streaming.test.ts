@@ -6,6 +6,7 @@ import {
   asyncIterableFrom,
   createMockChatCompletions,
   createMockRateLimit,
+  expectSSEContains,
 } from "./_test-utils"
 
 afterEach(() => {
@@ -43,17 +44,15 @@ test("falls back to streaming when downstream returns non-stream JSON", async ()
   )
 
   expect(res.status).toBe(200)
-  const ct = res.headers.get("content-type") || ""
-  expect(ct.includes("text/event-stream")).toBe(true)
+  expect(res.headers.get("content-type")).toContain("text/event-stream")
+
   const body = await res.text()
-
-  expect(body.includes("data:")).toBe(true)
-  expect(body.includes("stream me")).toBe(true)
-  expect(body.includes('"finishReason":"STOP"')).toBe(true)
-  expect(body.includes('"usageMetadata"')).toBe(true)
-
-  const occurrences = (body.match(/stream me/g) || []).length
-  expect(occurrences >= 1).toBe(true)
+  expectSSEContains(body, {
+    text: "stream me",
+    finishReason: "STOP",
+    usageMetadata: true,
+    textMatch: { pattern: "stream me", minOccurrences: 1 },
+  })
 })
 
 test("accumulates and parses partial JSON chunks", async () => {
@@ -98,15 +97,13 @@ test("accumulates and parses partial JSON chunks", async () => {
   )
 
   expect(res.status).toBe(200)
-  const ct = res.headers.get("content-type") || ""
-  expect(ct.includes("text/event-stream")).toBe(true)
+  expect(res.headers.get("content-type")).toContain("text/event-stream")
+
   const body = await res.text()
-
-  const helloCount = (body.match(/hello/g) || []).length
-  expect(helloCount).toBe(1)
-
-  expect(body.includes('"finishReason":"STOP"')).toBe(true)
-  expect(body.includes("data:")).toBe(true)
+  expectSSEContains(body, {
+    finishReason: "STOP",
+    textMatch: { pattern: "hello", minOccurrences: 1 },
+  })
 })
 
 test("includes usageMetadata only on final chunk and injects empty part when only finish_reason", async () => {
@@ -148,14 +145,11 @@ test("includes usageMetadata only on final chunk and injects empty part when onl
   expect(res.status).toBe(200)
   const body = await res.text()
 
-  const usageCount = (body.match(/"usageMetadata"/g) || []).length
-  expect(usageCount).toBe(1)
-
-  const finishStop = body.includes('"finishReason":"STOP"')
-  expect(finishStop).toBe(true)
-
-  const injectedEmpty = body.includes('"parts":[{"text":""}]')
-  expect(injectedEmpty).toBe(true)
+  expectSSEContains(body, {
+    finishReason: "STOP",
+    textMatch: { pattern: /"usageMetadata"/g, minOccurrences: 1 },
+    jsonContains: '"parts":[{"text":""}]',
+  })
 })
 
 test("[Stream] skips tool_calls with partial JSON arguments until complete", async () => {
@@ -232,8 +226,12 @@ test("[Stream] skips tool_calls with partial JSON arguments until complete", asy
   expect(res.status).toBe(200)
   const body = await res.text()
 
-  expect(body.includes('"functionCall":{"name":"f","args"')).toBe(true)
-  expect(body.includes('"functionCall":{"name":"f","args":{')).toBe(true)
-  expect(body.includes('"functionCall":{"name":"f","args":{')).toBe(true)
-  expect(body.includes('"functionCall":{"name":"f","args":{"a":1}')).toBe(true)
+  // Verify streaming tool call accumulation: name → args opening → args completion
+  expectSSEContains(body, {
+    toolCall: {
+      name: "f",
+      hasArgs: true,
+      completeArgs: true,
+    },
+  })
 })
