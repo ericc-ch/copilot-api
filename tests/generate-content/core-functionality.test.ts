@@ -2,7 +2,7 @@ import { afterEach, expect, test, mock } from "bun:test"
 
 import type { TestServer } from "./test-types"
 
-import { createMockChatCompletions } from "./_test-utils"
+import { createMockChatCompletions } from "./_test-utils/streaming"
 
 afterEach(() => {
   mock.restore()

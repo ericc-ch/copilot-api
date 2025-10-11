@@ -72,3 +72,50 @@ export interface GeminiTestRequest {
   }
   model?: string
 }
+
+// Tool cleanup expectations
+export interface ToolCleanupExpectation {
+  noDuplicates?: boolean
+  noEmptyFunctions?: boolean
+}
+
+// Translation test case schema
+export interface TranslationCase {
+  name: string
+  input: {
+    contents: Array<{
+      role: string
+      parts: Array<{ text?: string; functionCall?: unknown }>
+    }>
+    tools?: Array<unknown>
+    systemInstruction?: unknown
+  }
+  expect: {
+    messageCount?: number
+    roles?: Array<string>
+    toolCount?: number
+    hasToolCalls?: boolean
+  }
+}
+
+// SSE-related types
+export interface SSEEvent {
+  event?: string
+  data: string
+}
+
+export interface SSEMatcher {
+  text?: string
+  finishReason?: string
+  usageMetadata?: boolean
+  toolCall?: {
+    name: string
+    hasArgs?: boolean
+    completeArgs?: boolean
+  }
+  textMatch?: {
+    pattern: string | RegExp
+    minOccurrences?: number
+  }
+  jsonContains?: string
+}
