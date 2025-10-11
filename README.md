@@ -185,11 +185,12 @@ The server exposes several endpoints to interact with the Copilot API. It provid
 
 These endpoints mimic the OpenAI API structure.
 
-| Endpoint                    | Method | Description                                               |
-| --------------------------- | ------ | --------------------------------------------------------- |
-| `POST /v1/chat/completions` | `POST` | Creates a model response for the given chat conversation. |
-| `GET /v1/models`            | `GET`  | Lists the currently available models.                     |
-| `POST /v1/embeddings`       | `POST` | Creates an embedding vector representing the input text.  |
+| Endpoint                    | Method | Description                                                      |
+| --------------------------- | ------ | ---------------------------------------------------------------- |
+| `POST /v1/responses`        | `POST` | Most advanced interface for generating model responses.          |
+| `POST /v1/chat/completions` | `POST` | Creates a model response for the given chat conversation.        |
+| `GET /v1/models`            | `GET`  | Lists the currently available models.                            |
+| `POST /v1/embeddings`       | `POST` | Creates an embedding vector representing the input text.         |
 
 ### Anthropic Compatible Endpoints
 

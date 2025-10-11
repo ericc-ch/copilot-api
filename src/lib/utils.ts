@@ -24,3 +24,25 @@ export const cacheVSCodeVersion = async () => {
 
   consola.info(`Using VSCode version: ${response}`)
 }
+
+export const setupPingInterval = (
+  stream: {
+    writeSSE: (data: { event: string; data: string }) => Promise<void>
+  },
+  intervalMs: number = 3000,
+) => {
+  const pingInterval = setInterval(async () => {
+    try {
+      await stream.writeSSE({
+        event: "ping",
+        data: "",
+      })
+      consola.debug("Sent ping")
+    } catch (error) {
+      consola.warn("Failed to send ping:", error)
+      clearInterval(pingInterval)
+    }
+  }, intervalMs)
+
+  return pingInterval
+}
