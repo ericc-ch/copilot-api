@@ -1,6 +1,8 @@
 import { describe, it, expect } from "bun:test"
-import { copilotBaseUrl } from "../src/lib/api-config"
+
 import type { State } from "../src/lib/state"
+
+import { copilotBaseUrl } from "../src/lib/api-config"
 
 describe("copilotBaseUrl", () => {
   it("should return api.githubcopilot.com for individual account without enterprise", () => {

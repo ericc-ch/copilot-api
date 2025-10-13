@@ -84,14 +84,14 @@ export async function setupGitHubToken(
     const enterpriseFromOptions = options?.enterpriseUrl
     if (enterpriseFromOptions) state.enterpriseUrl = enterpriseFromOptions
 
-    const response = await getDeviceCode(state.enterpriseUrl)
+    const response = await getDeviceCode()
     consola.debug("Device code response:", response)
 
     consola.info(
       `Please enter the code "${response.user_code}" in ${response.verification_uri}`,
     )
 
-    const token = await pollAccessToken(response, state.enterpriseUrl)
+    const token = await pollAccessToken(response)
     await writeGithubToken(token)
     // persist enterprise url if set
     await writeEnterpriseUrl(state.enterpriseUrl)

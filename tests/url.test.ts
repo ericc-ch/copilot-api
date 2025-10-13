@@ -4,7 +4,6 @@ import {
   normalizeDomain,
   githubBaseUrl,
   githubApiBaseUrl,
-  looksLikeHost,
 } from "../src/lib/url"
 
 describe("URL helpers", () => {
@@ -62,26 +61,6 @@ describe("URL helpers", () => {
       expect(githubApiBaseUrl("https://ghe.example.com/")).toBe(
         "https://api.ghe.example.com",
       )
-    })
-  })
-
-  describe("looksLikeHost", () => {
-    it("returns false for empty/undefined input", () => {
-      expect(looksLikeHost(undefined)).toBe(false)
-      expect(looksLikeHost("")).toBe(false)
-    })
-
-    it("returns true for valid hostnames", () => {
-      expect(looksLikeHost("ghe.example.com")).toBe(true)
-      expect(looksLikeHost("sub.ghe.example.com")).toBe(true)
-      expect(looksLikeHost("localhost")).toBe(true)
-      expect(looksLikeHost("github-enterprise.company.com")).toBe(true)
-    })
-
-    it("returns false for invalid hostnames", () => {
-      expect(looksLikeHost("invalid host with spaces")).toBe(false)
-      expect(looksLikeHost("http://ghe.example.com")).toBe(false)
-      expect(looksLikeHost("ghe.example.com/path")).toBe(false)
     })
   })
 })

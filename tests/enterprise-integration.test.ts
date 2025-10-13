@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test"
-import { getDeviceCode } from "../src/services/github/get-device-code"
-import { pollAccessToken } from "../src/services/github/poll-access-token"
+
+import { state } from "../src/lib/state"
 import { getCopilotToken } from "../src/services/github/get-copilot-token"
 import { getCopilotUsage } from "../src/services/github/get-copilot-usage"
+import { getDeviceCode } from "../src/services/github/get-device-code"
 import { getGitHubUser } from "../src/services/github/get-user"
-import { state } from "../src/lib/state"
+import { pollAccessToken } from "../src/services/github/poll-access-token"
 
 describe("Enterprise OAuth Integration", () => {
-  const originalFetch = global.fetch
+  const originalFetch = globalThis.fetch
   let fetchCalls: Array<{ url: string; options?: any }> = []
 
   beforeEach(() => {
@@ -18,12 +19,12 @@ describe("Enterprise OAuth Integration", () => {
   })
 
   afterEach(() => {
-    global.fetch = originalFetch
+    globalThis.fetch = originalFetch
   })
 
   describe("getDeviceCode", () => {
     it("should use github.com when no enterprise URL", async () => {
-      global.fetch = mock((url: string, options?: any) => {
+      globalThis.fetch = mock((url: string, options?: any) => {
         fetchCalls.push({ url, options })
         return Promise.resolve({
           ok: true,
@@ -45,7 +46,9 @@ describe("Enterprise OAuth Integration", () => {
     })
 
     it("should use enterprise URL when provided", async () => {
-      global.fetch = mock((url: string, options?: any) => {
+      state.enterpriseUrl = "ghe.example.com"
+
+      globalThis.fetch = mock((url: string, options?: any) => {
         fetchCalls.push({ url, options })
         return Promise.resolve({
           ok: true,
@@ -60,7 +63,7 @@ describe("Enterprise OAuth Integration", () => {
         })
       }) as any
 
-      await getDeviceCode("ghe.example.com")
+      await getDeviceCode()
 
       expect(fetchCalls.length).toBe(1)
       expect(fetchCalls[0].url).toBe(
@@ -69,7 +72,9 @@ describe("Enterprise OAuth Integration", () => {
     })
 
     it("should normalize enterprise URL with https prefix", async () => {
-      global.fetch = mock((url: string, options?: any) => {
+      state.enterpriseUrl = "https://ghe.example.com/"
+
+      globalThis.fetch = mock((url: string, options?: any) => {
         fetchCalls.push({ url, options })
         return Promise.resolve({
           ok: true,
@@ -84,7 +89,7 @@ describe("Enterprise OAuth Integration", () => {
         })
       }) as any
 
-      await getDeviceCode("https://ghe.example.com/")
+      await getDeviceCode()
 
       expect(fetchCalls.length).toBe(1)
       expect(fetchCalls[0].url).toBe(
@@ -103,7 +108,7 @@ describe("Enterprise OAuth Integration", () => {
     }
 
     it("should use github.com when no enterprise URL", async () => {
-      global.fetch = mock((url: string, options?: any) => {
+      globalThis.fetch = mock((url: string, options?: any) => {
         fetchCalls.push({ url, options })
         return Promise.resolve({
           ok: true,
@@ -125,7 +130,9 @@ describe("Enterprise OAuth Integration", () => {
     })
 
     it("should use enterprise URL when provided", async () => {
-      global.fetch = mock((url: string, options?: any) => {
+      state.enterpriseUrl = "ghe.example.com"
+
+      globalThis.fetch = mock((url: string, options?: any) => {
         fetchCalls.push({ url, options })
         return Promise.resolve({
           ok: true,
@@ -138,7 +145,7 @@ describe("Enterprise OAuth Integration", () => {
         })
       }) as any
 
-      await pollAccessToken(deviceCodeResponse, "ghe.example.com")
+      await pollAccessToken(deviceCodeResponse)
 
       expect(fetchCalls.length).toBe(1)
       expect(fetchCalls[0].url).toBe(
@@ -151,7 +158,7 @@ describe("Enterprise OAuth Integration", () => {
     it("should use api.github.com when no enterprise URL", async () => {
       state.enterpriseUrl = undefined
 
-      global.fetch = mock((url: string, options?: any) => {
+      globalThis.fetch = mock((url: string, options?: any) => {
         fetchCalls.push({ url, options })
         return Promise.resolve({
           ok: true,
@@ -175,7 +182,7 @@ describe("Enterprise OAuth Integration", () => {
     it("should use enterprise API URL when configured", async () => {
       state.enterpriseUrl = "ghe.example.com"
 
-      global.fetch = mock((url: string, options?: any) => {
+      globalThis.fetch = mock((url: string, options?: any) => {
         fetchCalls.push({ url, options })
         return Promise.resolve({
           ok: true,
@@ -201,7 +208,7 @@ describe("Enterprise OAuth Integration", () => {
     it("should use api.github.com when no enterprise URL", async () => {
       state.enterpriseUrl = undefined
 
-      global.fetch = mock((url: string, options?: any) => {
+      globalThis.fetch = mock((url: string, options?: any) => {
         fetchCalls.push({ url, options })
         return Promise.resolve({
           ok: true,
@@ -227,7 +234,7 @@ describe("Enterprise OAuth Integration", () => {
     it("should use enterprise API URL when configured", async () => {
       state.enterpriseUrl = "ghe.example.com"
 
-      global.fetch = mock((url: string, options?: any) => {
+      globalThis.fetch = mock((url: string, options?: any) => {
         fetchCalls.push({ url, options })
         return Promise.resolve({
           ok: true,
@@ -255,7 +262,7 @@ describe("Enterprise OAuth Integration", () => {
     it("should use api.github.com when no enterprise URL", async () => {
       state.enterpriseUrl = undefined
 
-      global.fetch = mock((url: string, options?: any) => {
+      globalThis.fetch = mock((url: string, options?: any) => {
         fetchCalls.push({ url, options })
         return Promise.resolve({
           ok: true,
@@ -275,7 +282,7 @@ describe("Enterprise OAuth Integration", () => {
     it("should use enterprise API URL when configured", async () => {
       state.enterpriseUrl = "ghe.example.com"
 
-      global.fetch = mock((url: string, options?: any) => {
+      globalThis.fetch = mock((url: string, options?: any) => {
         fetchCalls.push({ url, options })
         return Promise.resolve({
           ok: true,

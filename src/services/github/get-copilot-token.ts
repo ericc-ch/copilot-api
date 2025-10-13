@@ -3,14 +3,12 @@ import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
 export const getCopilotToken = async () => {
-  // default path for GitHub.com
-  const base =
-    typeof GITHUB_API_BASE_URL === "function" ?
-      GITHUB_API_BASE_URL(state.enterpriseUrl)
-    : GITHUB_API_BASE_URL
-  const response = await fetch(`${base}/copilot_internal/v2/token`, {
-    headers: githubHeaders(state),
-  })
+  const response = await fetch(
+    `${GITHUB_API_BASE_URL()}/copilot_internal/v2/token`,
+    {
+      headers: githubHeaders(state),
+    },
+  )
 
   if (!response.ok) throw new HTTPError("Failed to get Copilot token", response)
 

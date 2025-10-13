@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import fs from "node:fs/promises"
-import path from "node:path"
 import os from "node:os"
+import path from "node:path"
 
 describe("Enterprise URL Persistence", () => {
   const TEST_APP_DIR = path.join(os.tmpdir(), "copilot-api-test")

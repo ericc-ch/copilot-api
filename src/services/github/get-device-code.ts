@@ -6,14 +6,8 @@ import {
 } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 
-export async function getDeviceCode(
-  enterpriseUrl?: string,
-): Promise<DeviceCodeResponse> {
-  const base =
-    typeof GITHUB_BASE_URL === "function" ?
-      GITHUB_BASE_URL(enterpriseUrl)
-    : GITHUB_BASE_URL
-  const response = await fetch(`${base}/login/device/code`, {
+export async function getDeviceCode(): Promise<DeviceCodeResponse> {
+  const response = await fetch(`${GITHUB_BASE_URL()}/login/device/code`, {
     method: "POST",
     headers: standardHeaders(),
     body: JSON.stringify({
