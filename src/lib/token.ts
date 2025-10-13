@@ -15,6 +15,19 @@ const readGithubToken = () => fs.readFile(PATHS.GITHUB_TOKEN_PATH, "utf8")
 const writeGithubToken = (token: string) =>
   fs.writeFile(PATHS.GITHUB_TOKEN_PATH, token)
 
+const readEnterpriseUrl = async () => {
+  try {
+    const txt = await fs.readFile(PATHS.ENTERPRISE_URL_PATH, "utf8")
+    const trimmed = txt.trim()
+    return trimmed || undefined
+  } catch {
+    return undefined
+  }
+}
+
+const writeEnterpriseUrl = (url?: string) =>
+  fs.writeFile(PATHS.ENTERPRISE_URL_PATH, url || "")
+
 export const setupCopilotToken = async () => {
   const { token, refresh_in } = await getCopilotToken()
   state.copilotToken = token
@@ -44,6 +57,7 @@ export const setupCopilotToken = async () => {
 
 interface SetupGitHubTokenOptions {
   force?: boolean
+  enterpriseUrl?: string
 }
 
 export async function setupGitHubToken(
@@ -51,6 +65,8 @@ export async function setupGitHubToken(
 ): Promise<void> {
   try {
     const githubToken = await readGithubToken()
+    const persistedEnterprise = await readEnterpriseUrl()
+    if (persistedEnterprise) state.enterpriseUrl = persistedEnterprise
 
     if (githubToken && !options?.force) {
       state.githubToken = githubToken
@@ -63,15 +79,22 @@ export async function setupGitHubToken(
     }
 
     consola.info("Not logged in, getting new access token")
-    const response = await getDeviceCode()
+
+    // if options passed enterpriseUrl, use it; otherwise use persisted
+    const enterpriseFromOptions = options?.enterpriseUrl
+    if (enterpriseFromOptions) state.enterpriseUrl = enterpriseFromOptions
+
+    const response = await getDeviceCode(state.enterpriseUrl)
     consola.debug("Device code response:", response)
 
     consola.info(
       `Please enter the code "${response.user_code}" in ${response.verification_uri}`,
     )
 
-    const token = await pollAccessToken(response)
+    const token = await pollAccessToken(response, state.enterpriseUrl)
     await writeGithubToken(token)
+    // persist enterprise url if set
+    await writeEnterpriseUrl(state.enterpriseUrl)
     state.githubToken = token
 
     if (state.showToken) {

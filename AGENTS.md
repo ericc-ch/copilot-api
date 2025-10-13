@@ -3,7 +3,7 @@
 ## Build, Lint, and Test Commands
 
 - **Build:**  
-  `bun run build` (uses tsup)
+  `bun run build` (uses tsdown)
 - **Dev:**  
   `bun run dev`
 - **Lint:**  

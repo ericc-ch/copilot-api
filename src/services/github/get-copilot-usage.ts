@@ -3,7 +3,11 @@ import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
 export const getCopilotUsage = async (): Promise<CopilotUsageResponse> => {
-  const response = await fetch(`${GITHUB_API_BASE_URL}/copilot_internal/user`, {
+  const base =
+    typeof GITHUB_API_BASE_URL === "function" ?
+      GITHUB_API_BASE_URL(state.enterpriseUrl)
+    : GITHUB_API_BASE_URL
+  const response = await fetch(`${base}/copilot_internal/user`, {
     headers: githubHeaders(state),
   })
 

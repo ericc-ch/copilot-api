@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto"
 
 import type { State } from "./state"
 
+import { githubBaseUrl, githubApiBaseUrl } from "./url"
+
 export const standardHeaders = () => ({
   "content-type": "application/json",
   accept: "application/json",
@@ -36,7 +38,8 @@ export const copilotHeaders = (state: State, vision: boolean = false) => {
   return headers
 }
 
-export const GITHUB_API_BASE_URL = "https://api.github.com"
+export const GITHUB_API_BASE_URL = (enterprise?: string) =>
+  githubApiBaseUrl(enterprise)
 export const githubHeaders = (state: State) => ({
   ...standardHeaders(),
   authorization: `token ${state.githubToken}`,
@@ -47,6 +50,7 @@ export const githubHeaders = (state: State) => ({
   "x-vscode-user-agent-library-version": "electron-fetch",
 })
 
-export const GITHUB_BASE_URL = "https://github.com"
+export const GITHUB_BASE_URL = (enterprise?: string) =>
+  githubBaseUrl(enterprise)
 export const GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 export const GITHUB_APP_SCOPES = ["read:user"].join(" ")
