@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto"
 
 import type { State } from "./state"
 
+import { state } from "./state"
+import { githubBaseUrl, githubApiBaseUrl } from "./url"
+
 export const standardHeaders = () => ({
   "content-type": "application/json",
   accept: "application/json",
@@ -13,10 +16,17 @@ const USER_AGENT = `GitHubCopilotChat/${COPILOT_VERSION}`
 
 const API_VERSION = "2025-04-01"
 
-export const copilotBaseUrl = (state: State) =>
-  state.accountType === "individual" ?
-    "https://api.githubcopilot.com"
-  : `https://api.${state.accountType}.githubcopilot.com`
+export const copilotBaseUrl = (state: State) => {
+  // If enterprise URL is configured, use enterprise Copilot API endpoint
+  if (state.enterpriseUrl) {
+    return `https://copilot-api.${state.enterpriseUrl}`
+  }
+
+  // Otherwise use standard GitHub Copilot endpoints based on account type
+  return state.accountType === "individual" ?
+      "https://api.githubcopilot.com"
+    : `https://api.${state.accountType}.githubcopilot.com`
+}
 export const copilotHeaders = (state: State, vision: boolean = false) => {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${state.copilotToken}`,
@@ -36,7 +46,7 @@ export const copilotHeaders = (state: State, vision: boolean = false) => {
   return headers
 }
 
-export const GITHUB_API_BASE_URL = "https://api.github.com"
+export const GITHUB_API_BASE_URL = () => githubApiBaseUrl(state.enterpriseUrl)
 export const githubHeaders = (state: State) => ({
   ...standardHeaders(),
   authorization: `token ${state.githubToken}`,
@@ -47,6 +57,6 @@ export const githubHeaders = (state: State) => ({
   "x-vscode-user-agent-library-version": "electron-fetch",
 })
 
-export const GITHUB_BASE_URL = "https://github.com"
+export const GITHUB_BASE_URL = () => githubBaseUrl(state.enterpriseUrl)
 export const GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 export const GITHUB_APP_SCOPES = ["read:user"].join(" ")

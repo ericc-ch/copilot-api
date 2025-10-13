@@ -3,7 +3,7 @@ import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
 export async function getGitHubUser() {
-  const response = await fetch(`${GITHUB_API_BASE_URL}/user`, {
+  const response = await fetch(`${GITHUB_API_BASE_URL()}/user`, {
     headers: {
       authorization: `token ${state.githubToken}`,
       ...standardHeaders(),
