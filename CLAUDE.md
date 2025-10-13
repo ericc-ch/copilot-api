@@ -74,7 +74,7 @@ Important notes for Claude Code instances
 - Local dev: Use "bun run dev" to iterate with file watching; use "bun run start" for a production-like run.
 - Authentication: The application persists GitHub tokens under ~/.local/share/copilot-api (see src/lib/paths.ts:5-12). Avoid exposing tokens in commits or logs.
 - GitHub Enterprise support: Use --enterprise-url flags for GitHub Enterprise Server/Cloud. The CLI will prompt interactively during auth if no enterprise URL is provided. Enterprise host is persisted for subsequent runs.
-- Enterprise URLs: Stored in APP_DIR/enterprise_url and normalized (scheme/slash stripped) before persistence. OAuth flows use https://{enterprise} endpoints, Copilot API uses https://api.{enterprise} endpoints.
+- Enterprise URLs: Stored in APP_DIR/enterprise_url and normalized (scheme/slash stripped) before persistence. OAuth flows use https://{enterprise} endpoints, Copilot API uses https://copilot-api.{enterprise} for models and chat endpoints, and https://api.{enterprise} for token/usage endpoints.
 - Rate limiting & manual approval: These behaviours are controlled in start.ts and state.ts; tests or changes touching rate limiting should check src/lib/rate-limit.ts.
 
 Files and areas to inspect for common tasks

@@ -362,3 +362,7 @@ bun run start
   - `--wait`: Use this with `--rate-limit`. It makes the server wait for the cooldown period to end instead of rejecting the request with an error. This is useful for clients that don't automatically retry on rate limit errors.
 - If you have a GitHub business or enterprise plan account with Copilot, use the `--account-type` flag (e.g., `--account-type business`). See the [official documentation](https://docs.github.com/en/enterprise-cloud@latest/copilot/managing-copilot/managing-github-copilot-in-your-organization/managing-access-to-github-copilot-in-your-organization/managing-github-copilot-access-to-your-organizations-network#configuring-copilot-subscription-based-network-routing-for-your-enterprise-or-organization) for more details.
 - For GitHub Enterprise Server/Cloud users: Use `--enterprise-url` to specify your enterprise host (e.g., `--enterprise-url https://ghe.example.com`). The interactive auth command (`copilot-api auth`) will prompt you for your enterprise host if you don't provide it via the CLI flag.
+
+
+
+export ANTHROPIC_BASE_URL=http://localhost:4141 ANTHROPIC_AUTH_TOKEN=dummy ANTHROPIC_MODEL=claude-sonnet-4.5 ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.5 ANTHROPIC_SMALL_FAST_MODEL=gpt-5-mini ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5-mini DISABLE_NON_ESSENTIAL_MODEL_CALLS=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 && claude

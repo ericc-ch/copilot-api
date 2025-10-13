@@ -15,10 +15,17 @@ const USER_AGENT = `GitHubCopilotChat/${COPILOT_VERSION}`
 
 const API_VERSION = "2025-04-01"
 
-export const copilotBaseUrl = (state: State) =>
-  state.accountType === "individual" ?
-    "https://api.githubcopilot.com"
-  : `https://api.${state.accountType}.githubcopilot.com`
+export const copilotBaseUrl = (state: State) => {
+  // If enterprise URL is configured, use enterprise Copilot API endpoint
+  if (state.enterpriseUrl) {
+    return `https://copilot-api.${state.enterpriseUrl}`
+  }
+
+  // Otherwise use standard GitHub Copilot endpoints based on account type
+  return state.accountType === "individual"
+    ? "https://api.githubcopilot.com"
+    : `https://api.${state.accountType}.githubcopilot.com`
+}
 export const copilotHeaders = (state: State, vision: boolean = false) => {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${state.copilotToken}`,
