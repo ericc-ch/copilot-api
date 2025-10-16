@@ -4,6 +4,7 @@ import consola from "consola"
 import { streamSSE } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
+import { recordRequest, recordTokenUsage } from "~/lib/metrics"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
 import {
@@ -40,11 +41,27 @@ export async function handleCompletion(c: Context) {
 
   const response = await createChatCompletions(openAIPayload)
 
+  // Record request
+  recordRequest(openAIPayload.model, "messages")
+
   if (isNonStreaming(response)) {
     consola.debug(
       "Non-streaming response from Copilot:",
       JSON.stringify(response).slice(-400),
     )
+
+    // Record token usage for non-streaming responses
+    if (response.usage) {
+      recordTokenUsage(
+        response.model,
+        response.usage.prompt_tokens,
+        response.usage.completion_tokens,
+      )
+      consola.info(
+        `Tokens (Anthropic) - Model: ${response.model}, In: ${response.usage.prompt_tokens}, Out: ${response.usage.completion_tokens}`,
+      )
+    }
+
     const anthropicResponse = translateToAnthropic(response)
     consola.debug(
       "Translated Anthropic response:",
@@ -54,6 +71,11 @@ export async function handleCompletion(c: Context) {
   }
 
   consola.debug("Streaming response from Copilot")
+
+  // For streaming responses, we'll accumulate token counts
+  let totalPromptTokens = 0
+  let totalCompletionTokens = 0
+
   return streamSSE(c, async (stream) => {
     const streamState: AnthropicStreamState = {
       messageStartSent: false,
@@ -73,6 +95,13 @@ export async function handleCompletion(c: Context) {
       }
 
       const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
+
+      // Extract usage information from chunks
+      if (chunk.usage) {
+        totalPromptTokens = chunk.usage.prompt_tokens
+        totalCompletionTokens = chunk.usage.completion_tokens
+      }
+
       const events = translateChunkToAnthropicEvents(chunk, streamState)
 
       for (const event of events) {
@@ -82,6 +111,18 @@ export async function handleCompletion(c: Context) {
           data: JSON.stringify(event),
         })
       }
+    }
+
+    // Record token usage after streaming completes
+    if (totalPromptTokens > 0 || totalCompletionTokens > 0) {
+      recordTokenUsage(
+        openAIPayload.model,
+        totalPromptTokens,
+        totalCompletionTokens,
+      )
+      consola.info(
+        `Tokens (Anthropic streaming) - Model: ${openAIPayload.model}, In: ${totalPromptTokens}, Out: ${totalCompletionTokens}`,
+      )
     }
   })
 }

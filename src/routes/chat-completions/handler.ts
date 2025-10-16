@@ -4,6 +4,7 @@ import consola from "consola"
 import { streamSSE, type SSEMessage } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
+import { recordRequest, recordTokenUsage } from "~/lib/metrics"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
 import { getTokenCount } from "~/lib/tokenizer"
@@ -49,16 +50,62 @@ export async function handleCompletion(c: Context) {
 
   const response = await createChatCompletions(payload)
 
+  // Record request
+  recordRequest(payload.model, "chat-completions")
+
   if (isNonStreaming(response)) {
     consola.debug("Non-streaming response:", JSON.stringify(response))
+
+    // Record token usage for non-streaming responses
+    if (response.usage) {
+      recordTokenUsage(
+        response.model,
+        response.usage.prompt_tokens,
+        response.usage.completion_tokens,
+      )
+      consola.info(
+        `Tokens - Model: ${response.model}, In: ${response.usage.prompt_tokens}, Out: ${response.usage.completion_tokens}`,
+      )
+    }
+
     return c.json(response)
   }
 
   consola.debug("Streaming response")
+
+  // For streaming responses, we'll accumulate token counts
+  let totalPromptTokens = 0
+  let totalCompletionTokens = 0
+
   return streamSSE(c, async (stream) => {
     for await (const chunk of response) {
       consola.debug("Streaming chunk:", JSON.stringify(chunk))
+
+      // Parse chunk data to extract usage information
+      if (chunk.data && chunk.data !== "[DONE]") {
+        try {
+          const parsed = JSON.parse(chunk.data) as {
+            usage?: { prompt_tokens?: number; completion_tokens?: number }
+          }
+          if (parsed.usage) {
+            totalPromptTokens = parsed.usage.prompt_tokens ?? totalPromptTokens
+            totalCompletionTokens =
+              parsed.usage.completion_tokens ?? totalCompletionTokens
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+      }
+
       await stream.writeSSE(chunk as SSEMessage)
+    }
+
+    // Record token usage after streaming completes
+    if (totalPromptTokens > 0 || totalCompletionTokens > 0) {
+      recordTokenUsage(payload.model, totalPromptTokens, totalCompletionTokens)
+      consola.info(
+        `Tokens (streaming) - Model: ${payload.model}, In: ${totalPromptTokens}, Out: ${totalCompletionTokens}`,
+      )
     }
   })
 }

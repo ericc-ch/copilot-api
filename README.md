@@ -204,10 +204,35 @@ These endpoints are designed to be compatible with the Anthropic Messages API.
 
 New endpoints for monitoring your Copilot usage and quotas.
 
-| Endpoint     | Method | Description                                                  |
-| ------------ | ------ | ------------------------------------------------------------ |
-| `GET /usage` | `GET`  | Get detailed Copilot usage statistics and quota information. |
-| `GET /token` | `GET`  | Get the current Copilot token being used by the API.         |
+| Endpoint      | Method | Description                                                  |
+| ------------- | ------ | ------------------------------------------------------------ |
+| `GET /usage`  | `GET`  | Get detailed Copilot usage statistics and quota information. |
+| `GET /token`  | `GET`  | Get the current Copilot token being used by the API.         |
+| `GET /metrics`| `GET`  | Prometheus metrics endpoint exposing token usage per model.  |
+
+### Prometheus Metrics
+
+The `/metrics` endpoint exposes Prometheus-compatible metrics for monitoring token usage:
+
+**Available Metrics:**
+- `copilot_api_tokens_in_total` - Total input tokens processed per model
+- `copilot_api_tokens_out_total` - Total output tokens generated per model  
+- `copilot_api_requests_total` - Total number of requests per model and endpoint
+
+Example metrics output:
+```
+# HELP copilot_api_tokens_in_total Total number of input tokens processed per model
+# TYPE copilot_api_tokens_in_total counter
+copilot_api_tokens_in_total{model="gpt-4o"} 1523
+
+# HELP copilot_api_tokens_out_total Total number of output tokens generated per model
+# TYPE copilot_api_tokens_out_total counter
+copilot_api_tokens_out_total{model="gpt-4o"} 342
+
+# HELP copilot_api_requests_total Total number of requests per model
+# TYPE copilot_api_requests_total counter
+copilot_api_requests_total{model="gpt-4o",endpoint="chat-completions"} 15
+```
 
 ## Example Usage
 
