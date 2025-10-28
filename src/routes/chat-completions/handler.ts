@@ -27,6 +27,18 @@ function formatDuration(seconds: number): string {
   return `0:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
 }
 
+// Helper function to format timestamp in local timezone
+function formatTimestamp(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  const hours = String(date.getHours()).padStart(2, "0")
+  const minutes = String(date.getMinutes()).padStart(2, "0")
+  const seconds = String(date.getSeconds()).padStart(2, "0")
+
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+}
+
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
@@ -75,7 +87,7 @@ export async function handleCompletion(c: Context) {
       const duration = (endTime - startTime) / 1000 // in seconds
       const speed =
         duration > 0 ? response.usage.completion_tokens / duration : 0
-      const timestamp = new Date().toISOString().replace("T", " ").slice(0, 19)
+      const timestamp = formatTimestamp(new Date())
       const timeFormatted = formatDuration(duration)
       const contextSize =
         selectedModel?.capabilities.limits.max_context_window_tokens ?? "N/A"
@@ -127,7 +139,7 @@ export async function handleCompletion(c: Context) {
       const endTime = Date.now()
       const duration = (endTime - startTime) / 1000 // in seconds
       const speed = duration > 0 ? totalCompletionTokens / duration : 0
-      const timestamp = new Date().toISOString().replace("T", " ").slice(0, 19)
+      const timestamp = formatTimestamp(new Date())
       const timeFormatted = formatDuration(duration)
       const contextSize =
         selectedModel?.capabilities.limits.max_context_window_tokens ?? "N/A"
