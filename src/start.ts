@@ -25,8 +25,30 @@ interface RunServerOptions {
   claudeCode: boolean
   showToken: boolean
   proxyEnv: boolean
+  apiKeys?: Array<string>
 }
 
+/**
+ * Start and configure the Copilot API server according to the provided options.
+ *
+ * Configures proxy and logging, initializes global state and credentials, ensures
+ * required paths and model data are cached, optionally generates a Claude Code
+ * launch command (and attempts to copy it to the clipboard), prints a usage
+ * viewer URL, and begins serving HTTP requests on the specified port.
+ *
+ * @param options - Server startup options:
+ *   - port: Port number to listen on
+ *   - verbose: Enable verbose logging
+ *   - accountType: Account plan to use ("individual", "business", "enterprise")
+ *   - manual: Require manual approval for requests
+ *   - rateLimit: Seconds to wait between requests (optional)
+ *   - rateLimitWait: Wait instead of erroring when rate limit is hit
+ *   - githubToken: GitHub token to use (optional; if omitted a token setup prompt may run)
+ *   - claudeCode: Generate a Claude Code environment launch command
+ *   - showToken: Expose GitHub/Copilot tokens in responses for debugging
+ *   - proxyEnv: Initialize proxy settings from environment variables
+ *   - apiKeys: Optional list of API keys to enable API key authentication
+ */
 export async function runServer(options: RunServerOptions): Promise<void> {
   if (options.proxyEnv) {
     initProxyFromEnv()
@@ -46,6 +68,13 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.rateLimitSeconds = options.rateLimit
   state.rateLimitWait = options.rateLimitWait
   state.showToken = options.showToken
+  state.apiKeys = options.apiKeys
+
+  if (state.apiKeys && state.apiKeys.length > 0) {
+    consola.info(
+      `API key authentication enabled with ${state.apiKeys.length} key(s)`,
+    )
+  }
 
   await ensurePaths()
   await cacheVSCodeVersion()
@@ -184,12 +213,23 @@ export const start = defineCommand({
       default: false,
       description: "Initialize proxy from environment variables",
     },
+    "api-key": {
+      type: "string",
+      description: "API keys for authentication",
+    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
     const rateLimit =
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       rateLimitRaw === undefined ? undefined : Number.parseInt(rateLimitRaw, 10)
+
+    // Handle multiple API keys - citty may pass a string or array
+    const apiKeyRaw = args["api-key"]
+    let apiKeys: Array<string> | undefined
+    if (apiKeyRaw) {
+      apiKeys = Array.isArray(apiKeyRaw) ? apiKeyRaw : [apiKeyRaw]
+    }
 
     return runServer({
       port: Number.parseInt(args.port, 10),
@@ -202,6 +242,7 @@ export const start = defineCommand({
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
       proxyEnv: args["proxy-env"],
+      apiKeys,
     })
   },
 })
