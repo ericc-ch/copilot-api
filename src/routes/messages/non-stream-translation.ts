@@ -139,25 +139,26 @@ function handleAssistantMessage(
     (block): block is AnthropicToolUseBlock => block.type === "tool_use",
   )
 
-  const textBlocks = message.content.filter(
-    (block): block is AnthropicTextBlock => block.type === "text",
-  )
-
   const thinkingBlocks = message.content.filter(
     (block): block is AnthropicThinkingBlock => block.type === "thinking",
   )
 
-  // Combine text and thinking blocks, as OpenAI doesn't have separate thinking blocks
-  const allTextContent = [
-    ...textBlocks.map((b) => b.text),
-    ...thinkingBlocks.map((b) => b.thinking),
-  ].join("\n\n")
+  const allThinkingContent = thinkingBlocks
+    .filter((b) => b.thinking && b.thinking.length > 0)
+    .map((b) => b.thinking)
+    .join("\n\n")
+
+  const signature = thinkingBlocks.find(
+    (b) => b.signature && b.signature.length > 0,
+  )?.signature
 
   return toolUseBlocks.length > 0 ?
       [
         {
           role: "assistant",
-          content: allTextContent || null,
+          content: mapContent(message.content),
+          reasoning_text: allThinkingContent,
+          reasoning_opaque: signature,
           tool_calls: toolUseBlocks.map((toolUse) => ({
             id: toolUse.id,
             type: "function",
@@ -172,6 +173,8 @@ function handleAssistantMessage(
         {
           role: "assistant",
           content: mapContent(message.content),
+          reasoning_text: allThinkingContent,
+          reasoning_opaque: signature,
         },
       ]
 }
@@ -191,11 +194,8 @@ function mapContent(
   const hasImage = content.some((block) => block.type === "image")
   if (!hasImage) {
     return content
-      .filter(
-        (block): block is AnthropicTextBlock | AnthropicThinkingBlock =>
-          block.type === "text" || block.type === "thinking",
-      )
-      .map((block) => (block.type === "text" ? block.text : block.thinking))
+      .filter((block): block is AnthropicTextBlock => block.type === "text")
+      .map((block) => block.text)
       .join("\n\n")
   }
 
@@ -204,12 +204,6 @@ function mapContent(
     switch (block.type) {
       case "text": {
         contentParts.push({ type: "text", text: block.text })
-
-        break
-      }
-      case "thinking": {
-        contentParts.push({ type: "text", text: block.thinking })
-
         break
       }
       case "image": {
@@ -219,7 +213,6 @@ function mapContent(
             url: `data:${block.source.media_type};base64,${block.source.data}`,
           },
         })
-
         break
       }
       // No default
@@ -282,19 +275,19 @@ export function translateToAnthropic(
   response: ChatCompletionResponse,
 ): AnthropicResponse {
   // Merge content from all choices
-  const allTextBlocks: Array<AnthropicTextBlock> = []
-  const allToolUseBlocks: Array<AnthropicToolUseBlock> = []
-  let stopReason: "stop" | "length" | "tool_calls" | "content_filter" | null =
-    null // default
-  stopReason = response.choices[0]?.finish_reason ?? stopReason
+  const assistantContentBlocks: Array<AnthropicAssistantContentBlock> = []
+  let stopReason = response.choices[0]?.finish_reason ?? null
 
   // Process all choices to extract text and tool use blocks
   for (const choice of response.choices) {
     const textBlocks = getAnthropicTextBlocks(choice.message.content)
+    const thingBlocks = getAnthropicThinkBlocks(
+      choice.message.reasoning_text,
+      choice.message.reasoning_opaque,
+    )
     const toolUseBlocks = getAnthropicToolUseBlocks(choice.message.tool_calls)
 
-    allTextBlocks.push(...textBlocks)
-    allToolUseBlocks.push(...toolUseBlocks)
+    assistantContentBlocks.push(...thingBlocks, ...textBlocks, ...toolUseBlocks)
 
     // Use the finish_reason from the first choice, or prioritize tool_calls
     if (choice.finish_reason === "tool_calls" || stopReason === "stop") {
@@ -302,14 +295,12 @@ export function translateToAnthropic(
     }
   }
 
-  // Note: GitHub Copilot doesn't generate thinking blocks, so we don't include them in responses
-
   return {
     id: response.id,
     type: "message",
     role: "assistant",
     model: response.model,
-    content: [...allTextBlocks, ...allToolUseBlocks],
+    content: assistantContentBlocks,
     stop_reason: mapOpenAIStopReasonToAnthropic(stopReason),
     stop_sequence: null,
     usage: {
@@ -329,7 +320,7 @@ export function translateToAnthropic(
 function getAnthropicTextBlocks(
   messageContent: Message["content"],
 ): Array<AnthropicTextBlock> {
-  if (typeof messageContent === "string") {
+  if (typeof messageContent === "string" && messageContent.length > 0) {
     return [{ type: "text", text: messageContent }]
   }
 
@@ -339,6 +330,31 @@ function getAnthropicTextBlocks(
       .map((part) => ({ type: "text", text: part.text }))
   }
 
+  return []
+}
+
+function getAnthropicThinkBlocks(
+  reasoningText: string | null | undefined,
+  reasoningOpaque: string | null | undefined,
+): Array<AnthropicThinkingBlock> {
+  if (reasoningText && reasoningText.length > 0) {
+    return [
+      {
+        type: "thinking",
+        thinking: reasoningText,
+        signature: reasoningOpaque || "",
+      },
+    ]
+  }
+  if (reasoningOpaque && reasoningOpaque.length > 0) {
+    return [
+      {
+        type: "thinking",
+        thinking: "",
+        signature: reasoningOpaque,
+      },
+    ]
+  }
   return []
 }
 

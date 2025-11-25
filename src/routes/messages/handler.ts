@@ -60,6 +60,7 @@ export async function handleCompletion(c: Context) {
       contentBlockIndex: 0,
       contentBlockOpen: false,
       toolCalls: {},
+      thinkingBlockOpen: false,
     }
 
     for await (const rawEvent of response) {
