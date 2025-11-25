@@ -136,6 +136,7 @@ describe("Anthropic to OpenAI translation logic", () => {
             {
               type: "thinking",
               thinking: "Let me think about this simple math problem...",
+              signature: "abc123",
             },
             { type: "text", text: "2+2 equals 4." },
           ],
@@ -150,7 +151,7 @@ describe("Anthropic to OpenAI translation logic", () => {
     const assistantMessage = openAIPayload.messages.find(
       (m) => m.role === "assistant",
     )
-    expect(assistantMessage?.content).toContain(
+    expect(assistantMessage?.reasoning_text).toContain(
       "Let me think about this simple math problem...",
     )
     expect(assistantMessage?.content).toContain("2+2 equals 4.")
@@ -168,6 +169,7 @@ describe("Anthropic to OpenAI translation logic", () => {
               type: "thinking",
               thinking:
                 "I need to call the weather API to get current weather information.",
+              signature: "def456",
             },
             { type: "text", text: "I'll check the weather for you." },
             {
@@ -188,7 +190,7 @@ describe("Anthropic to OpenAI translation logic", () => {
     const assistantMessage = openAIPayload.messages.find(
       (m) => m.role === "assistant",
     )
-    expect(assistantMessage?.content).toContain(
+    expect(assistantMessage?.reasoning_text).toContain(
       "I need to call the weather API",
     )
     expect(assistantMessage?.content).toContain(

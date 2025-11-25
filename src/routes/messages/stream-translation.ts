@@ -1,4 +1,8 @@
-import { type ChatCompletionChunk } from "~/services/copilot/create-chat-completions"
+import {
+  type ChatCompletionChunk,
+  type Choice,
+  type Delta,
+} from "~/services/copilot/create-chat-completions"
 
 import {
   type AnthropicStreamEventData,
@@ -16,7 +20,6 @@ function isToolBlockOpen(state: AnthropicStreamState): boolean {
   )
 }
 
-// eslint-disable-next-line max-lines-per-function, complexity
 export function translateChunkToAnthropicEvents(
   chunk: ChatCompletionChunk,
   state: AnthropicStreamState,
@@ -30,22 +33,54 @@ export function translateChunkToAnthropicEvents(
   const choice = chunk.choices[0]
   const { delta } = choice
 
-  if (!state.messageStartSent) {
-    events.push({
-      type: "message_start",
-      message: {
-        id: chunk.id,
-        type: "message",
-        role: "assistant",
-        content: [],
-        model: chunk.model,
-        stop_reason: null,
-        stop_sequence: null,
+  handleMessageStart(state, events, chunk)
+
+  handleThinkingText(delta, state, events)
+
+  handleContent(delta, state, events)
+
+  handleToolCalls(delta, state, events)
+
+  handleFinish(choice, state, { events, chunk })
+
+  return events
+}
+
+function handleFinish(
+  choice: Choice,
+  state: AnthropicStreamState,
+  context: {
+    events: Array<AnthropicStreamEventData>
+    chunk: ChatCompletionChunk
+  },
+) {
+  const { events, chunk } = context
+  if (choice.finish_reason && choice.finish_reason.length > 0) {
+    if (state.contentBlockOpen) {
+      const toolBlockOpen = isToolBlockOpen(state)
+      context.events.push({
+        type: "content_block_stop",
+        index: state.contentBlockIndex,
+      })
+      state.contentBlockOpen = false
+      state.contentBlockIndex++
+      if (!toolBlockOpen) {
+        handleReasoningOpaque(choice.delta, events, state)
+      }
+    }
+
+    events.push(
+      {
+        type: "message_delta",
+        delta: {
+          stop_reason: mapOpenAIStopReasonToAnthropic(choice.finish_reason),
+          stop_sequence: null,
+        },
         usage: {
           input_tokens:
             (chunk.usage?.prompt_tokens ?? 0)
             - (chunk.usage?.prompt_tokens_details?.cached_tokens ?? 0),
-          output_tokens: 0, // Will be updated in message_delta when finished
+          output_tokens: chunk.usage?.completion_tokens ?? 0,
           ...(chunk.usage?.prompt_tokens_details?.cached_tokens
             !== undefined && {
             cache_read_input_tokens:
@@ -53,44 +88,23 @@ export function translateChunkToAnthropicEvents(
           }),
         },
       },
-    })
-    state.messageStartSent = true
-  }
-
-  if (delta.content) {
-    if (isToolBlockOpen(state)) {
-      // A tool block was open, so close it before starting a text block.
-      events.push({
-        type: "content_block_stop",
-        index: state.contentBlockIndex,
-      })
-      state.contentBlockIndex++
-      state.contentBlockOpen = false
-    }
-
-    if (!state.contentBlockOpen) {
-      events.push({
-        type: "content_block_start",
-        index: state.contentBlockIndex,
-        content_block: {
-          type: "text",
-          text: "",
-        },
-      })
-      state.contentBlockOpen = true
-    }
-
-    events.push({
-      type: "content_block_delta",
-      index: state.contentBlockIndex,
-      delta: {
-        type: "text_delta",
-        text: delta.content,
+      {
+        type: "message_stop",
       },
-    })
+    )
   }
+}
 
-  if (delta.tool_calls) {
+function handleToolCalls(
+  delta: Delta,
+  state: AnthropicStreamState,
+  events: Array<AnthropicStreamEventData>,
+) {
+  if (delta.tool_calls && delta.tool_calls.length > 0) {
+    closeThinkingBlockIfOpen(state, events)
+
+    handleReasoningOpaqueInToolCalls(state, events, delta)
+
     for (const toolCall of delta.tool_calls) {
       if (toolCall.id && toolCall.function?.name) {
         // New tool call starting.
@@ -141,28 +155,86 @@ export function translateChunkToAnthropicEvents(
       }
     }
   }
+}
 
-  if (choice.finish_reason) {
-    if (state.contentBlockOpen) {
+function handleReasoningOpaqueInToolCalls(
+  state: AnthropicStreamState,
+  events: Array<AnthropicStreamEventData>,
+  delta: Delta,
+) {
+  if (state.contentBlockOpen && !isToolBlockOpen(state)) {
+    events.push({
+      type: "content_block_stop",
+      index: state.contentBlockIndex,
+    })
+    state.contentBlockIndex++
+    state.contentBlockOpen = false
+  }
+  handleReasoningOpaque(delta, events, state)
+}
+
+function handleContent(
+  delta: Delta,
+  state: AnthropicStreamState,
+  events: Array<AnthropicStreamEventData>,
+) {
+  if (delta.content && delta.content.length > 0) {
+    closeThinkingBlockIfOpen(state, events)
+
+    if (isToolBlockOpen(state)) {
+      // A tool block was open, so close it before starting a text block.
       events.push({
         type: "content_block_stop",
         index: state.contentBlockIndex,
       })
+      state.contentBlockIndex++
       state.contentBlockOpen = false
     }
 
-    events.push(
-      {
-        type: "message_delta",
-        delta: {
-          stop_reason: mapOpenAIStopReasonToAnthropic(choice.finish_reason),
-          stop_sequence: null,
+    if (!state.contentBlockOpen) {
+      events.push({
+        type: "content_block_start",
+        index: state.contentBlockIndex,
+        content_block: {
+          type: "text",
+          text: "",
         },
+      })
+      state.contentBlockOpen = true
+    }
+
+    events.push({
+      type: "content_block_delta",
+      index: state.contentBlockIndex,
+      delta: {
+        type: "text_delta",
+        text: delta.content,
+      },
+    })
+  }
+}
+
+function handleMessageStart(
+  state: AnthropicStreamState,
+  events: Array<AnthropicStreamEventData>,
+  chunk: ChatCompletionChunk,
+) {
+  if (!state.messageStartSent) {
+    events.push({
+      type: "message_start",
+      message: {
+        id: chunk.id,
+        type: "message",
+        role: "assistant",
+        content: [],
+        model: chunk.model,
+        stop_reason: null,
+        stop_sequence: null,
         usage: {
           input_tokens:
             (chunk.usage?.prompt_tokens ?? 0)
             - (chunk.usage?.prompt_tokens_details?.cached_tokens ?? 0),
-          output_tokens: chunk.usage?.completion_tokens ?? 0,
+          output_tokens: 0, // Will be updated in message_delta when finished
           ...(chunk.usage?.prompt_tokens_details?.cached_tokens
             !== undefined && {
             cache_read_input_tokens:
@@ -170,13 +242,121 @@ export function translateChunkToAnthropicEvents(
           }),
         },
       },
+    })
+    state.messageStartSent = true
+  }
+}
+
+function handleReasoningOpaque(
+  delta: Delta,
+  events: Array<AnthropicStreamEventData>,
+  state: AnthropicStreamState,
+) {
+  if (delta.reasoning_opaque && delta.reasoning_opaque.length > 0) {
+    events.push(
       {
-        type: "message_stop",
+        type: "content_block_start",
+        index: state.contentBlockIndex,
+        content_block: {
+          type: "thinking",
+          thinking: "",
+        },
+      },
+      {
+        type: "content_block_delta",
+        index: state.contentBlockIndex,
+        delta: {
+          type: "thinking_delta",
+          thinking: "",
+        },
+      },
+      {
+        type: "content_block_delta",
+        index: state.contentBlockIndex,
+        delta: {
+          type: "signature_delta",
+          signature: delta.reasoning_opaque,
+        },
+      },
+      {
+        type: "content_block_stop",
+        index: state.contentBlockIndex,
       },
     )
+    state.contentBlockIndex++
   }
+}
 
-  return events
+function handleThinkingText(
+  delta: Delta,
+  state: AnthropicStreamState,
+  events: Array<AnthropicStreamEventData>,
+) {
+  if (delta.reasoning_text && delta.reasoning_text.length > 0) {
+    if (!state.thinkingBlockOpen) {
+      events.push({
+        type: "content_block_start",
+        index: state.contentBlockIndex,
+        content_block: {
+          type: "thinking",
+          thinking: "",
+        },
+      })
+      state.thinkingBlockOpen = true
+    }
+
+    events.push({
+      type: "content_block_delta",
+      index: state.contentBlockIndex,
+      delta: {
+        type: "thinking_delta",
+        thinking: delta.reasoning_text,
+      },
+    })
+
+    if (delta.reasoning_opaque && delta.reasoning_opaque.length > 0) {
+      events.push(
+        {
+          type: "content_block_delta",
+          index: state.contentBlockIndex,
+          delta: {
+            type: "signature_delta",
+            signature: delta.reasoning_opaque,
+          },
+        },
+        {
+          type: "content_block_stop",
+          index: state.contentBlockIndex,
+        },
+      )
+      state.contentBlockIndex++
+      state.thinkingBlockOpen = false
+    }
+  }
+}
+
+function closeThinkingBlockIfOpen(
+  state: AnthropicStreamState,
+  events: Array<AnthropicStreamEventData>,
+): void {
+  if (state.thinkingBlockOpen) {
+    events.push(
+      {
+        type: "content_block_delta",
+        index: state.contentBlockIndex,
+        delta: {
+          type: "signature_delta",
+          signature: "",
+        },
+      },
+      {
+        type: "content_block_stop",
+        index: state.contentBlockIndex,
+      },
+    )
+    state.contentBlockIndex++
+    state.thinkingBlockOpen = false
+  }
 }
 
 export function translateErrorToAnthropicErrorEvent(): AnthropicStreamEventData {

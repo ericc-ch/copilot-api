@@ -39,6 +39,7 @@ A reverse-engineered proxy for the GitHub Copilot API that exposes it as an Open
 - **Token Visibility**: Option to display GitHub and Copilot tokens during authentication and refresh for debugging (`--show-token`).
 - **Flexible Authentication**: Authenticate interactively or provide a GitHub token directly, suitable for CI/CD environments.
 - **Support for Different Account Types**: Works with individual, business, and enterprise GitHub Copilot plans.
+- **GitHub Enterprise Support**: Compatible with GitHub Enterprise Server and GitHub Enterprise Cloud installations.
 
 ## Demo
 
@@ -163,6 +164,7 @@ The following command line options are available for the `start` command:
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
 | --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
+| --enterprise-url | GitHub Enterprise host to use (eg. https://ghe.example.com)               | none       | none  |
 
 ### Auth Command Options
 
@@ -170,6 +172,7 @@ The following command line options are available for the `start` command:
 | ------------ | ------------------------- | ------- | ----- |
 | --verbose    | Enable verbose logging    | false   | -v    |
 | --show-token | Show GitHub token on auth | false   | none  |
+| --enterprise-url | GitHub Enterprise host (eg. https://ghe.example.com) | none | none |
 
 ### Debug Command Options
 
@@ -255,6 +258,15 @@ npx copilot-api@latest debug --json
 
 # Initialize proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, etc.)
 npx copilot-api@latest start --proxy-env
+
+# Use GitHub Enterprise / GitHub Enterprise Server
+npx copilot-api@latest start --account-type enterprise --enterprise-url https://ghe.example.com
+
+# Authenticate with GitHub Enterprise interactively (will prompt for enterprise host)
+npx copilot-api@latest auth
+
+# Authenticate with GitHub Enterprise using CLI flag (for scripting)
+npx copilot-api@latest auth --enterprise-url ghe.example.com
 ```
 
 ## Using the Usage Viewer
@@ -349,3 +361,8 @@ bun run start
   - `--rate-limit <seconds>`: Enforces a minimum time interval between requests. For example, `copilot-api start --rate-limit 30` will ensure there's at least a 30-second gap between requests.
   - `--wait`: Use this with `--rate-limit`. It makes the server wait for the cooldown period to end instead of rejecting the request with an error. This is useful for clients that don't automatically retry on rate limit errors.
 - If you have a GitHub business or enterprise plan account with Copilot, use the `--account-type` flag (e.g., `--account-type business`). See the [official documentation](https://docs.github.com/en/enterprise-cloud@latest/copilot/managing-copilot/managing-github-copilot-in-your-organization/managing-access-to-github-copilot-in-your-organization/managing-github-copilot-access-to-your-organizations-network#configuring-copilot-subscription-based-network-routing-for-your-enterprise-or-organization) for more details.
+- For GitHub Enterprise Server/Cloud users: Use `--enterprise-url` to specify your enterprise host (e.g., `--enterprise-url https://ghe.example.com`). The interactive auth command (`copilot-api auth`) will prompt you for your enterprise host if you don't provide it via the CLI flag.
+
+
+
+export ANTHROPIC_BASE_URL=http://localhost:4141 ANTHROPIC_AUTH_TOKEN=dummy ANTHROPIC_MODEL=claude-sonnet-4.5 ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.5 ANTHROPIC_SMALL_FAST_MODEL=gpt-5-mini ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5-mini DISABLE_NON_ESSENTIAL_MODEL_CALLS=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 && claude
