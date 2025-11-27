@@ -154,6 +154,7 @@ The following command line options are available for the `start` command:
 | Option         | Description                                                                   | Default    | Alias |
 | -------------- | ----------------------------------------------------------------------------- | ---------- | ----- |
 | --port         | Port to listen on                                                             | 4141       | -p    |
+| --host         | Host/interface to listen on (e.g., 127.0.0.1 for IPv4, ::1 for IPv6)          | all (::)   | -h    |
 | --verbose      | Enable verbose logging                                                        | false      | -v    |
 | --account-type | Account type to use (individual, business, enterprise)                        | individual | -a    |
 | --manual       | Enable manual request approval                                                | false      | none  |
@@ -163,6 +164,24 @@ The following command line options are available for the `start` command:
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
 | --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
+
+ 
+#### Usage examples with --host
+ 
+Listen on IPv4 localhost only:
+```sh
+npx copilot-api@latest start --account-type business --host 127.0.0.1
+```
+ 
+Listen on IPv6 localhost only:
+```sh
+npx copilot-api@latest start --account-type business --host ::1
+```
+ 
+Default (listen on all interfaces):
+```sh
+npx copilot-api@latest start --account-type business
+```
 
 ### Auth Command Options
 

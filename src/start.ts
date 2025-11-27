@@ -16,6 +16,7 @@ import { server } from "./server"
 
 interface RunServerOptions {
   port: number
+  host?: string
   verbose: boolean
   accountType: string
   manual: boolean
@@ -65,6 +66,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   )
 
   const serverUrl = `http://localhost:${options.port}`
+  const hostForUrl = options.host || 'localhost';
 
   if (options.claudeCode) {
     invariant(state.models, "Models should be loaded by now")
@@ -117,6 +119,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   serve({
     fetch: server.fetch as ServerHandler,
     port: options.port,
+    hostname: options.host || undefined, // undefined falls back to system default (all interfaces)
   })
 }
 
@@ -137,6 +140,12 @@ export const start = defineCommand({
       type: "boolean",
       default: false,
       description: "Enable verbose logging",
+    },
+    host: {
+      alias: "h",
+      type: "string",
+      description:
+        "Host/interface to listen on (e.g., 127.0.0.1 for IPv4 localhost, ::1 for IPv6 localhost)",
     },
     "account-type": {
       alias: "a",
@@ -193,6 +202,7 @@ export const start = defineCommand({
 
     return runServer({
       port: Number.parseInt(args.port, 10),
+      host: args.host,
       verbose: args.verbose,
       accountType: args["account-type"],
       manual: args.manual,
