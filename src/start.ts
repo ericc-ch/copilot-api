@@ -47,10 +47,14 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.rateLimitWait = options.rateLimitWait
   state.showToken = options.showToken
 
+  // Initialize request queue with rate limit
+  state.requestQueue.updateRateLimit(options.rateLimit)
+
   await ensurePaths()
   await cacheVSCodeVersion()
 
   if (options.githubToken) {
+    // eslint-disable-next-line require-atomic-updates
     state.githubToken = options.githubToken
     consola.info("Using provided GitHub token")
   } else {
@@ -152,6 +156,7 @@ export const start = defineCommand({
     "rate-limit": {
       alias: "r",
       type: "string",
+      default: "3",
       description: "Rate limit in seconds between requests",
     },
     wait: {
