@@ -199,6 +199,7 @@ These endpoints are designed to be compatible with the Anthropic Messages API.
 | -------------------------------- | ------ | ------------------------------------------------------------ |
 | `POST /v1/messages`              | `POST` | Creates a model response for a given conversation.           |
 | `POST /v1/messages/count_tokens` | `POST` | Calculates the number of tokens for a given set of messages. |
+| `POST /api/event_logging/batch`  | `POST` | Anthropic telemetry log (ignore, just return 200)          |
 
 ### Usage Monitoring Endpoints
 
