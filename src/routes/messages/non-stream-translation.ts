@@ -1,3 +1,5 @@
+import consola from "consola"
+
 import {
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
@@ -48,11 +50,15 @@ export function translateToOpenAI(
 
 function translateModelName(model: string): string {
   // Subagent requests use a specific model number which Copilot doesn't support
-  if (model.startsWith("claude-sonnet-4-")) {
-    return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
-  } else if (model.startsWith("claude-opus-")) {
-    return model.replace(/^claude-opus-4-.*/, "claude-opus-4")
+  if (model.startsWith("claude")) {
+    const newModel = model.replaceAll(
+      /(claude-(?:haiku|sonnet|opus)-\d+)-(\d+)(?:[.-]\d+)?/g,
+      "$1.$2",
+    )
+    consola.log("Use Model:", model, newModel)
+    return newModel
   }
+  consola.log("Use Model:", model)
   return model
 }
 
