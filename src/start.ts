@@ -60,6 +60,15 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   await setupCopilotToken()
   await cacheModels()
 
+  // Load AWS credentials from environment if available
+  state.awsRegion = process.env.AWS_REGION
+  state.awsAccessKeyId = process.env.AWS_ACCESS_KEY_ID
+  state.awsSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY
+
+  if (state.awsRegion && state.awsAccessKeyId && state.awsSecretAccessKey) {
+    consola.info(`AWS Bedrock configured for region: ${state.awsRegion}`)
+  }
+
   consola.info(
     `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
   )

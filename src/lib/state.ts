@@ -15,6 +15,11 @@ export interface State {
   // Rate limiting configuration
   rateLimitSeconds?: number
   lastRequestTimestamp?: number
+
+  // AWS Bedrock configuration
+  awsRegion?: string
+  awsAccessKeyId?: string
+  awsSecretAccessKey?: string
 }
 
 export const state: State = {

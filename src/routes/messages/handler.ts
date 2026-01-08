@@ -3,14 +3,15 @@ import type { Context } from "hono"
 import consola from "consola"
 import { streamSSE } from "hono/streaming"
 
+import type {
+  ChatCompletionChunk,
+  ChatCompletionResponse,
+} from "~/services/copilot/create-chat-completions"
+
 import { awaitApproval } from "~/lib/approval"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
-import {
-  createChatCompletions,
-  type ChatCompletionChunk,
-  type ChatCompletionResponse,
-} from "~/services/copilot/create-chat-completions"
+import { routeToProvider } from "~/services/provider-router"
 
 import {
   type AnthropicMessagesPayload,
@@ -38,7 +39,7 @@ export async function handleCompletion(c: Context) {
     await awaitApproval()
   }
 
-  const response = await createChatCompletions(openAIPayload)
+  const response = await routeToProvider(openAIPayload)
 
   if (isNonStreaming(response)) {
     consola.debug(
@@ -87,5 +88,5 @@ export async function handleCompletion(c: Context) {
 }
 
 const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
+  response: Awaited<ReturnType<typeof routeToProvider>>,
 ): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
