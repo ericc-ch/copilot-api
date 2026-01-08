@@ -18,8 +18,21 @@ export class RequestQueue {
   private maxRetries = 5 // Maximum number of retries for rate limit errors
   private requestTimeout = 60000 // 60s timeout per request
 
+  // Adaptive rate limiting
+  private successfulRequestsInRow = 0
+  private rateLimitHitsInWindow = 0
+  private rateLimitWindowStart = Date.now()
+  private readonly rateLimitWindowMs = 60000 // 1 minute window
+  private readonly successThresholdToDecrease = 10 // Decrease after 10 successful requests
+  private readonly minRateLimitMs = 100 // Minimum 100ms between requests
+  private readonly decreaseFactor = 0.9 // Decrease by 10% when successful
+  private readonly maxRateLimitMs = 60000 // Maximum 60s between requests
+
   constructor(rateLimitSeconds?: number) {
-    this.rateLimitMs = rateLimitSeconds ? rateLimitSeconds * 1000 : 0
+    // Smart default: 1 second if not specified (adaptive rate limiting enabled)
+    // Use 0 to explicitly disable rate limiting
+    this.rateLimitMs =
+      rateLimitSeconds !== undefined ? rateLimitSeconds * 1000 : 1000 // 1 second default
   }
 
   async enqueue<T>(execute: () => Promise<T>): Promise<T> {
@@ -74,6 +87,9 @@ export class RequestQueue {
 
       // Handle rate limit errors with automatic retry
       if (error instanceof RateLimitError) {
+        // Track rate limit hits for adaptive adjustment
+        this.trackRateLimitHit()
+
         // Add jitter to prevent thundering herd
         const delayWithJitter = addJitter(error.retryInfo.retryAfter)
         const waitTimeMs = delayWithJitter * 1000
@@ -82,10 +98,8 @@ export class RequestQueue {
           `Rate limit hit (attempt ${retryCount + 1}/${this.maxRetries}). Waiting ${delayWithJitter.toFixed(1)}s before retry...`,
         )
 
-        // Dynamically adjust rate limit if needed
-        if (error.retryInfo.retryAfter > this.rateLimitMs / 1000) {
-          this.updateRateLimit(error.retryInfo.retryAfter)
-        }
+        // Adaptively adjust rate limit based on 429 frequency
+        this.adjustRateLimitUp(error.retryInfo.retryAfter)
 
         await new Promise((resolve) => setTimeout(resolve, waitTimeMs))
 
@@ -164,11 +178,17 @@ export class RequestQueue {
         )
         item.resolve(result)
         this.lastProcessedTime = Date.now()
+
+        // Track successful request for adaptive rate limit decrease
+        this.trackSuccessfulRequest()
       } catch (error) {
         // executeWithRetry already handles retries, so if we get here, all retries failed
         consola.error("Request failed after all retries:", error)
         item.reject(error)
         this.lastProcessedTime = Date.now()
+
+        // Reset success counter on failure
+        this.successfulRequestsInRow = 0
       }
     }
 
@@ -195,5 +215,82 @@ export class RequestQueue {
         `Rate limit updated to ${rateLimitSeconds}s`
       : "Rate limit disabled",
     )
+  }
+
+  /**
+   * Track a rate limit hit (429 response) for adaptive adjustment
+   */
+  private trackRateLimitHit(): void {
+    const now = Date.now()
+
+    // Reset window if expired
+    if (now - this.rateLimitWindowStart > this.rateLimitWindowMs) {
+      this.rateLimitHitsInWindow = 0
+      this.rateLimitWindowStart = now
+    }
+
+    this.rateLimitHitsInWindow++
+    this.successfulRequestsInRow = 0 // Reset success counter
+  }
+
+  /**
+   * Adjust rate limit UP (slow down) when hitting 429s
+   * More aggressive if we're hitting many 429s in a short time
+   */
+  private adjustRateLimitUp(retryAfterSeconds: number): void {
+    const suggestedRateLimitMs = retryAfterSeconds * 1000
+
+    // If we're hitting many 429s, be more conservative (add buffer)
+    let adjustedRateLimitMs = suggestedRateLimitMs
+    if (this.rateLimitHitsInWindow > 3) {
+      // Add 20% buffer if hitting rate limits frequently
+      adjustedRateLimitMs = suggestedRateLimitMs * 1.2
+      consola.debug(
+        `Frequent rate limits detected (${this.rateLimitHitsInWindow} in last minute), adding 20% buffer`,
+      )
+    }
+
+    // Only increase if the new limit is higher
+    if (adjustedRateLimitMs > this.rateLimitMs) {
+      const oldLimit = (this.rateLimitMs / 1000).toFixed(1)
+      const newLimit = (adjustedRateLimitMs / 1000).toFixed(1)
+
+      // Cap at maximum
+      this.rateLimitMs = Math.min(adjustedRateLimitMs, this.maxRateLimitMs)
+
+      consola.info(
+        `Rate limit increased: ${oldLimit}s → ${newLimit}s (${this.rateLimitHitsInWindow} hits in last minute)`,
+      )
+    }
+  }
+
+  /**
+   * Track a successful request and potentially decrease rate limit (speed up)
+   */
+  private trackSuccessfulRequest(): void {
+    this.successfulRequestsInRow++
+
+    // Only decrease if we have a rate limit set and we've had enough successes
+    if (
+      this.rateLimitMs > this.minRateLimitMs
+      && this.successfulRequestsInRow >= this.successThresholdToDecrease
+    ) {
+      const oldLimit = (this.rateLimitMs / 1000).toFixed(1)
+
+      // Gradually decrease rate limit by 10%
+      this.rateLimitMs = Math.max(
+        this.minRateLimitMs,
+        this.rateLimitMs * this.decreaseFactor,
+      )
+
+      const newLimit = (this.rateLimitMs / 1000).toFixed(1)
+
+      consola.info(
+        `Rate limit decreased: ${oldLimit}s → ${newLimit}s (${this.successfulRequestsInRow} consecutive successes)`,
+      )
+
+      // Reset counter after adjustment
+      this.successfulRequestsInRow = 0
+    }
   }
 }

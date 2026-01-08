@@ -156,7 +156,8 @@ export const start = defineCommand({
     "rate-limit": {
       alias: "r",
       type: "string",
-      description: "Rate limit in seconds between requests",
+      description:
+        "Rate limit in seconds between requests (default: 1s with adaptive adjustment, use 0 to disable)",
     },
     wait: {
       alias: "w",
