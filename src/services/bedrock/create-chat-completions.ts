@@ -139,23 +139,20 @@ function translateMessageContent(
 }
 
 /**
- * Map model name to Bedrock model ID
- * Using Claude 3.5 models (Claude 4 not yet available on Bedrock)
+ * Map model name to Bedrock model ID (ARN format)
  */
 function mapModelIdToBedrock(model: string): string {
-  // Map to Claude 3.5 models (Claude 4 not yet on Bedrock)
+  // Use full ARN format for Claude 4 models
   if (model.includes("sonnet")) {
-    return "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    return "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0"
   }
   if (model.includes("haiku")) {
-    return "anthropic.claude-3-5-haiku-20241022-v1:0"
+    return "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
   }
 
-  // Default to latest Claude 3.5 Sonnet if unknown
-  consola.warn(
-    `Unknown model ${model}, defaulting to Claude 3.5 Sonnet (Claude 4 not yet on Bedrock)`,
-  )
-  return "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  // Default to Claude 4 Sonnet if unknown
+  consola.warn(`Unknown model ${model}, defaulting to Claude Sonnet 4.5`)
+  return "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0"
 }
 
 /**
