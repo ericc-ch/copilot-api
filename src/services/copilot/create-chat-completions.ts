@@ -3,6 +3,7 @@ import { events } from "fetch-event-stream"
 
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { checkRateLimitError } from "~/lib/retry"
 import { state } from "~/lib/state"
 
 export const createChatCompletions = async (
@@ -35,8 +36,45 @@ export const createChatCompletions = async (
   })
 
   if (!response.ok) {
-    consola.error("Failed to create chat completions", response)
-    throw new HTTPError("Failed to create chat completions", response)
+    // Check if this is a rate limit error (429)
+    const rateLimitError = checkRateLimitError(response)
+    if (rateLimitError) {
+      throw rateLimitError
+    }
+
+    // Log detailed error information for other errors
+    consola.error(
+      `Failed to create chat completions: ${response.status} ${response.statusText}`,
+    )
+
+    // Log all response headers
+    const responseHeaders: Record<string, string> = {}
+    for (const [key, value] of response.headers.entries()) {
+      responseHeaders[key] = value
+    }
+    consola.error("Response headers:", JSON.stringify(responseHeaders, null, 2))
+
+    // Try to parse and log the error body, and store it for later use
+    let errorBodyText: string | undefined
+    try {
+      const errorBody = await response.json()
+      errorBodyText = JSON.stringify(errorBody)
+      consola.error("Error body:", errorBodyText)
+    } catch {
+      // Try to read as text if JSON parsing fails
+      try {
+        errorBodyText = await response.text()
+        consola.error("Error body:", errorBodyText || null)
+      } catch {
+        consola.error("Could not read error body")
+      }
+    }
+
+    throw new HTTPError(
+      "Failed to create chat completions",
+      response,
+      errorBodyText,
+    )
   }
 
   if (payload.stream) {

@@ -5,6 +5,23 @@ import type { State } from "./state"
 import { HTTPError } from "./error"
 import { sleep } from "./utils"
 
+/**
+ * Execute a request with rate limiting using the request queue.
+ * Requests are automatically queued and processed at the configured rate limit.
+ * @param state - Application state containing the request queue
+ * @param execute - The async function to execute
+ * @returns The result of the executed function
+ */
+export async function executeWithRateLimit<T>(
+  state: State,
+  execute: () => Promise<T>,
+): Promise<T> {
+  return state.requestQueue.enqueue(execute)
+}
+
+/**
+ * @deprecated Use executeWithRateLimit instead for better queue-based rate limiting
+ */
 export async function checkRateLimit(state: State) {
   if (state.rateLimitSeconds === undefined) return
 
