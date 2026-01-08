@@ -23,9 +23,9 @@ export class RequestQueue {
   private rateLimitHitsInWindow = 0
   private rateLimitWindowStart = Date.now()
   private readonly rateLimitWindowMs = 60000 // 1 minute window
-  private readonly successThresholdToDecrease = 10 // Decrease after 10 successful requests
+  private readonly successThresholdToDecrease = 20 // Decrease after 20 successful requests (conservative)
   private readonly minRateLimitMs = 100 // Minimum 100ms between requests
-  private readonly decreaseFactor = 0.9 // Decrease by 10% when successful
+  private readonly decreaseFactor = 0.95 // Decrease by 5% when successful (conservative)
   private readonly maxRateLimitMs = 60000 // Maximum 60s between requests
 
   constructor(rateLimitSeconds?: number) {
@@ -242,11 +242,11 @@ export class RequestQueue {
 
     // If we're hitting many 429s, be more conservative (add buffer)
     let adjustedRateLimitMs = suggestedRateLimitMs
-    if (this.rateLimitHitsInWindow > 3) {
-      // Add 20% buffer if hitting rate limits frequently
-      adjustedRateLimitMs = suggestedRateLimitMs * 1.2
+    if (this.rateLimitHitsInWindow > 2) {
+      // Add 40% buffer if hitting rate limits frequently
+      adjustedRateLimitMs = suggestedRateLimitMs * 1.4
       consola.debug(
-        `Frequent rate limits detected (${this.rateLimitHitsInWindow} in last minute), adding 20% buffer`,
+        `Frequent rate limits detected (${this.rateLimitHitsInWindow} in last minute), adding 40% buffer`,
       )
     }
 
