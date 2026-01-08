@@ -10,12 +10,12 @@ import {
 /**
  * Route requests to the appropriate provider based on model name
  * - Opus models → GitHub Copilot API
- * - Sonnet/Haiku models → AWS Bedrock (if configured)
+ * - Sonnet/Haiku models → Round-robin between Copilot and Bedrock
  */
 export async function routeToProvider(payload: ChatCompletionsPayload) {
   const provider = determineProvider(payload.model)
 
-  consola.debug(`Routing model "${payload.model}" to provider: ${provider}`)
+  consola.info(`Routing "${payload.model}" → ${provider.toUpperCase()}`)
 
   if (provider === "bedrock") {
     return createBedrockChatCompletions(payload)
@@ -25,23 +25,34 @@ export async function routeToProvider(payload: ChatCompletionsPayload) {
 }
 
 /**
- * Determine which provider to use based on model name
+ * Determine which provider to use based on model name with round-robin for Sonnet/Haiku
  */
 function determineProvider(model: string): "copilot" | "bedrock" {
   const modelLower = model.toLowerCase()
+
+  // Opus always uses Copilot
+  if (modelLower.includes("opus")) {
+    return "copilot"
+  }
 
   // Check if AWS Bedrock is configured
   const bedrockConfigured =
     state.awsRegion && state.awsAccessKeyId && state.awsSecretAccessKey
 
-  // Sonnet and Haiku use Bedrock if configured
-  if (
-    bedrockConfigured
-    && (modelLower.includes("sonnet") || modelLower.includes("haiku"))
-  ) {
-    return "bedrock"
+  // Sonnet and Haiku use round-robin between Copilot and Bedrock (if configured)
+  if (modelLower.includes("sonnet") || modelLower.includes("haiku")) {
+    if (!bedrockConfigured) {
+      // If Bedrock not configured, always use Copilot
+      return "copilot"
+    }
+
+    // Round-robin: increment counter and alternate between providers
+    state.providerRoundRobinCounter++
+    const useBedrockForThisRequest = state.providerRoundRobinCounter % 2 === 0
+
+    return useBedrockForThisRequest ? "bedrock" : "copilot"
   }
 
-  // Opus always uses Copilot (or fallback to Copilot if Bedrock not configured)
+  // Default to Copilot for any other model
   return "copilot"
 }

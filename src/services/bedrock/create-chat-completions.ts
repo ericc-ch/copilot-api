@@ -14,6 +14,7 @@ import type {
   ChatCompletionResponse,
   ChatCompletionsPayload,
   ContentPart,
+  TextPart,
 } from "~/services/copilot/create-chat-completions"
 
 import { HTTPError } from "~/lib/error"
@@ -34,6 +35,7 @@ export const createBedrockChatCompletions = async (
     credentials: {
       accessKeyId: state.awsAccessKeyId,
       secretAccessKey: state.awsSecretAccessKey,
+      sessionToken: state.awsSessionToken,
     },
   })
 
@@ -52,22 +54,29 @@ export const createBedrockChatCompletions = async (
 function translateToBedrockFormat(
   payload: ChatCompletionsPayload,
 ): ConverseCommandInput {
-  const messages: Array<BedrockMessage> = payload.messages.map((msg) => ({
-    role: (msg.role === "assistant" ? "assistant" : "user") as ConversationRole,
-    content: translateMessageContent(msg.content),
-  }))
-
-  // Extract system messages
+  // Extract system messages first
   const systemMessages = payload.messages
     .filter((msg) => msg.role === "system")
     .map((msg) => ({
       text: typeof msg.content === "string" ? msg.content : "",
     }))
+    .filter((msg) => msg.text.trim())
 
-  // Filter out system messages from main messages
-  const filteredMessages = messages.filter(
-    (_, idx) => payload.messages[idx]?.role !== "system",
-  )
+  // Process non-system messages, filtering out empty content
+  const filteredMessages: Array<BedrockMessage> = payload.messages
+    .filter((msg) => msg.role !== "system")
+    .map((msg) => {
+      const content = translateMessageContent(msg.content)
+      if (!content) return null
+
+      return {
+        role: (msg.role === "assistant" ?
+          "assistant"
+        : "user") as ConversationRole,
+        content,
+      }
+    })
+    .filter((msg): msg is BedrockMessage => msg !== null)
 
   return {
     modelId: mapModelIdToBedrock(payload.model),
@@ -94,38 +103,48 @@ function formatStopSequences(
 
 /**
  * Translate message content to Bedrock format
+ * Returns null for empty content to allow filtering at message level
  */
 function translateMessageContent(
   content: string | Array<ContentPart> | null,
-): Array<{ text: string }> {
+): Array<{ text: string }> | null {
   if (typeof content === "string") {
-    return [{ text: content }]
+    return content.trim() ? [{ text: content }] : null
   }
 
   if (Array.isArray(content)) {
-    return content
-      .filter((part) => part.type === "text")
+    const textParts = content
+      .filter(
+        (part): part is TextPart =>
+          part.type === "text" && Boolean(part.text.trim()),
+      )
       .map((part) => ({ text: part.text }))
+
+    return textParts.length > 0 ? textParts : null
   }
 
-  return [{ text: "" }]
+  return null
 }
 
 /**
- * Map model name to Bedrock model ID
+ * Map model name to Bedrock inference profile ID
+ * Using global inference profiles for on-demand access
  */
 function mapModelIdToBedrock(model: string): string {
-  // Map common model names to Bedrock model IDs
+  // Map common model names to Bedrock global inference profiles
+  // These profiles work with on-demand throughput
   if (model.includes("sonnet")) {
-    return "anthropic.claude-sonnet-4-20250514-v1:0"
+    return "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
   }
   if (model.includes("haiku")) {
-    return "anthropic.claude-haiku-4-20250514-v1:0"
+    return "global.anthropic.claude-haiku-4-5-20251001-v1:0"
   }
 
   // Default to latest sonnet if unknown
-  consola.warn(`Unknown model ${model}, defaulting to Sonnet`)
-  return "anthropic.claude-sonnet-4-20250514-v1:0"
+  consola.warn(
+    `Unknown model ${model}, defaulting to Claude Sonnet 4.5 inference profile`,
+  )
+  return "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
 }
 
 /**

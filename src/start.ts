@@ -65,6 +65,8 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.awsAccessKeyId = process.env.AWS_ACCESS_KEY_ID
   state.awsSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY
 
+  state.awsSessionToken = process.env.AWS_SESSION_TOKEN
+
   if (state.awsRegion && state.awsAccessKeyId && state.awsSecretAccessKey) {
     consola.info(`AWS Bedrock configured for region: ${state.awsRegion}`)
   }
