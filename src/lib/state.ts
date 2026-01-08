@@ -1,6 +1,7 @@
 import type { ModelsResponse } from "~/services/copilot/get-models"
 
 import { RequestQueue } from "./queue"
+import { RequestCache } from "./request-cache"
 
 export interface State {
   githubToken?: string
@@ -18,6 +19,9 @@ export interface State {
   rateLimitSeconds?: number
   lastRequestTimestamp?: number
   requestQueue: RequestQueue
+
+  // Request caching for deduplication
+  requestCache: RequestCache
 }
 
 export const state: State = {
@@ -26,4 +30,5 @@ export const state: State = {
   rateLimitWait: false,
   showToken: false,
   requestQueue: new RequestQueue(),
+  requestCache: new RequestCache(30, 1000), // 30s TTL, max 1000 entries
 }

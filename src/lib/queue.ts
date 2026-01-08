@@ -265,28 +265,50 @@ export class RequestQueue {
   }
 
   /**
+   * Get adaptive decrease strategy based on distance from rate limit
+   * More aggressive when far from limit, more cautious when close
+   */
+  private getDecreaseStrategy(): { threshold: number; factor: number } {
+    if (this.rateLimitMs > 10000) {
+      // Far from limit (>10s): be aggressive
+      return { threshold: 10, factor: 0.9 } // 10% decrease after 10 successes
+    }
+    if (this.rateLimitMs > 2000) {
+      // Medium distance (2-10s): be moderate
+      return { threshold: 15, factor: 0.93 } // 7% decrease after 15 successes
+    }
+    // Close to limit (<2s): be very cautious (use defaults)
+    return { threshold: 20, factor: 0.95 } // 5% decrease after 20 successes
+  }
+
+  /**
    * Track a successful request and potentially decrease rate limit (speed up)
+   * Uses adaptive strategy based on distance from rate limit
    */
   private trackSuccessfulRequest(): void {
     this.successfulRequestsInRow++
 
+    // Get adaptive strategy based on current rate limit
+    const strategy = this.getDecreaseStrategy()
+
     // Only decrease if we have a rate limit set and we've had enough successes
     if (
       this.rateLimitMs > this.minRateLimitMs
-      && this.successfulRequestsInRow >= this.successThresholdToDecrease
+      && this.successfulRequestsInRow >= strategy.threshold
     ) {
       const oldLimit = (this.rateLimitMs / 1000).toFixed(1)
 
-      // Gradually decrease rate limit by 10%
+      // Decrease rate limit using adaptive factor
       this.rateLimitMs = Math.max(
         this.minRateLimitMs,
-        this.rateLimitMs * this.decreaseFactor,
+        this.rateLimitMs * strategy.factor,
       )
 
       const newLimit = (this.rateLimitMs / 1000).toFixed(1)
+      const decreasePercent = ((1 - strategy.factor) * 100).toFixed(0)
 
       consola.info(
-        `Rate limit decreased: ${oldLimit}s → ${newLimit}s (${this.successfulRequestsInRow} consecutive successes)`,
+        `Rate limit decreased: ${oldLimit}s → ${newLimit}s (${this.successfulRequestsInRow} consecutive successes, ${decreasePercent}% decrease)`,
       )
 
       // Reset counter after adjustment

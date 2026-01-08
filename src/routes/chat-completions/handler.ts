@@ -47,12 +47,27 @@ export async function handleCompletion(c: Context) {
       consola.debug("Set max_tokens to:", JSON.stringify(payload.max_tokens))
     }
 
+    // Check cache for non-streaming requests
+    if (!payload.stream) {
+      const cachedResponse = state.requestCache.get(
+        payload,
+      ) as ChatCompletionResponse | null
+      if (cachedResponse) {
+        // Add rate limit headers even for cached responses
+        addRateLimitHeaders(c, state)
+        return c.json(cachedResponse)
+      }
+    }
+
     const response = await createChatCompletions(payload)
 
     // Add rate limit headers to response
     addRateLimitHeaders(c, state)
 
     if (isNonStreaming(response)) {
+      // Cache non-streaming responses
+      state.requestCache.set(payload, response)
+
       consola.debug("Non-streaming response:", JSON.stringify(response))
       return c.json(response)
     }

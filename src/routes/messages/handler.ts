@@ -37,6 +37,19 @@ export async function handleCompletion(c: Context) {
       JSON.stringify(openAIPayload),
     )
 
+    // Check cache for non-streaming requests
+    if (!openAIPayload.stream) {
+      const cachedResponse = state.requestCache.get(
+        openAIPayload,
+      ) as ChatCompletionResponse | null
+      if (cachedResponse) {
+        // Add rate limit headers even for cached responses
+        addRateLimitHeaders(c, state)
+        const anthropicResponse = translateToAnthropic(cachedResponse)
+        return c.json(anthropicResponse)
+      }
+    }
+
     if (state.manualApprove) {
       await awaitApproval()
     }
@@ -47,6 +60,9 @@ export async function handleCompletion(c: Context) {
     addRateLimitHeaders(c, state)
 
     if (isNonStreaming(response)) {
+      // Cache non-streaming responses
+      state.requestCache.set(openAIPayload, response)
+
       consola.debug(
         "Non-streaming response from Copilot:",
         JSON.stringify(response).slice(-400),
