@@ -78,17 +78,29 @@ function translateToBedrockFormat(
     })
     .filter((msg): msg is BedrockMessage => msg !== null)
 
-  return {
+  const bedrockInput = {
     modelId: mapModelIdToBedrock(payload.model),
     messages: filteredMessages,
     system: systemMessages.length > 0 ? systemMessages : undefined,
     inferenceConfig: {
-      maxTokens: payload.max_tokens ?? undefined,
+      // Ensure maxTokens is always set - default to 4096 if not specified
+      maxTokens: payload.max_tokens ?? 4096,
       temperature: payload.temperature ?? undefined,
       topP: payload.top_p ?? undefined,
       stopSequences: formatStopSequences(payload.stop),
     },
   }
+
+  consola.debug("Bedrock request config:", {
+    modelId: bedrockInput.modelId,
+    messageCount: bedrockInput.messages.length,
+    systemMessageCount: bedrockInput.system?.length ?? 0,
+    maxTokens: bedrockInput.inferenceConfig.maxTokens,
+    temperature: bedrockInput.inferenceConfig.temperature,
+    stopSequences: bedrockInput.inferenceConfig.stopSequences,
+  })
+
+  return bedrockInput
 }
 
 /**
@@ -127,24 +139,21 @@ function translateMessageContent(
 }
 
 /**
- * Map model name to Bedrock inference profile ID
- * Using global inference profiles for on-demand access
+ * Map model name to Bedrock model ID
+ * Using standard Anthropic model IDs
  */
 function mapModelIdToBedrock(model: string): string {
-  // Map common model names to Bedrock global inference profiles
-  // These profiles work with on-demand throughput
+  // Map common model names to Bedrock Anthropic model IDs
   if (model.includes("sonnet")) {
-    return "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    return "anthropic.claude-sonnet-4-0-v2:0"
   }
   if (model.includes("haiku")) {
-    return "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    return "anthropic.claude-haiku-4-0-v2:0"
   }
 
   // Default to latest sonnet if unknown
-  consola.warn(
-    `Unknown model ${model}, defaulting to Claude Sonnet 4.5 inference profile`,
-  )
-  return "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+  consola.warn(`Unknown model ${model}, defaulting to Claude Sonnet 4`)
+  return "anthropic.claude-sonnet-4-0-v2:0"
 }
 
 /**
@@ -194,6 +203,54 @@ async function handleNonStreamingResponse(
 }
 
 /**
+ * Create a content chunk for streaming
+ */
+function createContentChunk(
+  content: string,
+  chunkIndex: number,
+  model: string,
+): ChatCompletionChunk {
+  return {
+    id: `bedrock-${Date.now()}-${chunkIndex}`,
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [
+      {
+        index: 0,
+        delta: { content },
+        finish_reason: null,
+        logprobs: null,
+      },
+    ],
+  }
+}
+
+/**
+ * Create a final chunk with finish reason
+ */
+function createFinalChunk(
+  chunkIndex: number,
+  model: string,
+  finishReason: string,
+): ChatCompletionChunk {
+  return {
+    id: `bedrock-${Date.now()}-${chunkIndex}`,
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [
+      {
+        index: 0,
+        delta: {},
+        finish_reason: finishReason,
+        logprobs: null,
+      },
+    ],
+  }
+}
+
+/**
  * Handle streaming response
  */
 async function* handleStreamingResponse(
@@ -210,60 +267,55 @@ async function* handleStreamingResponse(
     }
 
     let chunkIndex = 0
+    let hasMessageStop = false
+    let streamError: Error | null = null
 
-    for await (const event of response.stream) {
-      if (event.contentBlockDelta?.delta?.text) {
-        const chunk: ChatCompletionChunk = {
-          id: `bedrock-${Date.now()}-${chunkIndex}`,
-          object: "chat.completion.chunk",
-          created: Math.floor(Date.now() / 1000),
-          model: originalModel,
-          choices: [
-            {
-              index: 0,
-              delta: {
-                content: event.contentBlockDelta.delta.text,
-              },
-              finish_reason: null,
-              logprobs: null,
-            },
-          ],
+    consola.debug("Bedrock stream started")
+
+    try {
+      for await (const event of response.stream) {
+        consola.debug("Bedrock stream event:", JSON.stringify(event))
+
+        if (event.contentBlockDelta?.delta?.text) {
+          const chunk = createContentChunk(
+            event.contentBlockDelta.delta.text,
+            chunkIndex,
+            originalModel,
+          )
+          yield { event: "message", data: JSON.stringify(chunk) }
+          chunkIndex++
         }
 
-        yield {
-          event: "message",
-          data: JSON.stringify(chunk),
-        }
-
-        chunkIndex++
-      }
-
-      if (event.messageStop) {
-        const finalChunk: ChatCompletionChunk = {
-          id: `bedrock-${Date.now()}-${chunkIndex}`,
-          object: "chat.completion.chunk",
-          created: Math.floor(Date.now() / 1000),
-          model: originalModel,
-          choices: [
-            {
-              index: 0,
-              delta: {},
-              finish_reason: mapStopReason(event.messageStop.stopReason),
-              logprobs: null,
-            },
-          ],
-        }
-
-        yield {
-          event: "message",
-          data: JSON.stringify(finalChunk),
-        }
-
-        yield {
-          data: "[DONE]",
+        if (event.messageStop) {
+          hasMessageStop = true
+          const finalChunk = createFinalChunk(
+            chunkIndex,
+            originalModel,
+            mapStopReason(event.messageStop.stopReason),
+          )
+          yield { event: "message", data: JSON.stringify(finalChunk) }
         }
       }
+    } catch (error) {
+      consola.warn("Bedrock stream interrupted:", error)
+      streamError = error as Error
     }
+
+    consola.debug(
+      "Bedrock stream completed, hasMessageStop:",
+      hasMessageStop,
+      "streamError:",
+      streamError?.message,
+    )
+
+    // Always send final chunk and [DONE] after stream completes
+    if (!hasMessageStop) {
+      const finalChunk = createFinalChunk(chunkIndex, originalModel, "stop")
+      yield { event: "message", data: JSON.stringify(finalChunk) }
+    }
+
+    consola.debug("Bedrock sending [DONE]")
+    yield { data: "[DONE]" }
   } catch (error) {
     consola.error("Failed to stream Bedrock chat completions", error)
     throw new HTTPError("Failed to stream Bedrock chat completions", {
