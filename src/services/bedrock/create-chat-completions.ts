@@ -139,20 +139,20 @@ function translateMessageContent(
 }
 
 /**
- * Map model name to Bedrock model ID (ARN format)
+ * Map model name to Bedrock global inference profile ID
  */
 function mapModelIdToBedrock(model: string): string {
-  // Use full ARN format for Claude 4 models
+  // Use global inference profiles for Claude 4.5 models
   if (model.includes("sonnet")) {
-    return "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0"
+    return "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
   }
   if (model.includes("haiku")) {
-    return "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+    return "global.anthropic.claude-haiku-4-5-20251001-v1:0"
   }
 
-  // Default to Claude 4 Sonnet if unknown
+  // Default to Claude Sonnet 4.5 if unknown
   consola.warn(`Unknown model ${model}, defaulting to Claude Sonnet 4.5`)
-  return "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0"
+  return "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
 }
 
 /**
