@@ -47,8 +47,10 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.rateLimitWait = options.rateLimitWait
   state.showToken = options.showToken
 
-  // Initialize request queue with rate limit
-  state.requestQueue.updateRateLimit(options.rateLimit)
+  // Initialize request queue with rate limit (only if explicitly provided)
+  if (options.rateLimit !== undefined) {
+    state.requestQueue.updateRateLimit(options.rateLimit)
+  }
 
   await ensurePaths()
   await cacheVSCodeVersion()
