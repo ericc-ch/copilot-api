@@ -10,14 +10,14 @@ export interface RateLimitInfo {
 /**
  * Parse rate limit headers from an API response.
  * Supports multiple header formats:
- * - X-RateLimit-* (GitHub style)
+ * - X-RateLimit-* (GitHub/Copilot style)
  * - RateLimit-* (RFC draft)
  * - Retry-After (for 429 responses)
  */
 export function parseRateLimitHeaders(headers: Headers): RateLimitInfo {
   const info: RateLimitInfo = {}
 
-  // Try X-RateLimit-* format first (GitHub style)
+  // Try X-RateLimit-* format first (GitHub/Copilot style)
   const xLimit = headers.get("X-RateLimit-Limit")
   const xRemaining = headers.get("X-RateLimit-Remaining")
   const xReset = headers.get("X-RateLimit-Reset")
