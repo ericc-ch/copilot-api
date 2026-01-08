@@ -235,20 +235,33 @@ export class RequestQueue {
 
   /**
    * Adjust rate limit UP (slow down) when hitting 429s
-   * More aggressive if we're hitting many 429s in a short time
+   * Always applies buffer - more aggressive if we're hitting many 429s in a short time
    */
   private adjustRateLimitUp(retryAfterSeconds: number): void {
     const suggestedRateLimitMs = retryAfterSeconds * 1000
 
-    // If we're hitting many 429s, be more conservative (add buffer)
-    let adjustedRateLimitMs = suggestedRateLimitMs
-    if (this.rateLimitHitsInWindow > 2) {
-      // Add 40% buffer if hitting rate limits frequently
-      adjustedRateLimitMs = suggestedRateLimitMs * 1.4
-      consola.debug(
-        `Frequent rate limits detected (${this.rateLimitHitsInWindow} in last minute), adding 40% buffer`,
-      )
+    // Always add buffer when hitting rate limits - be more conservative
+    // Use tiered approach: more hits = bigger buffer
+    let adjustedRateLimitMs: number
+    let bufferPercent: number
+
+    if (this.rateLimitHitsInWindow >= 3) {
+      // 3+ hits: be very conservative - add 75% buffer
+      adjustedRateLimitMs = suggestedRateLimitMs * 1.75
+      bufferPercent = 75
+    } else if (this.rateLimitHitsInWindow >= 2) {
+      // 2+ hits: be quite conservative - add 50% buffer
+      adjustedRateLimitMs = suggestedRateLimitMs * 1.5
+      bufferPercent = 50
+    } else {
+      // First hit: add 25% buffer immediately
+      adjustedRateLimitMs = suggestedRateLimitMs * 1.25
+      bufferPercent = 25
     }
+
+    consola.debug(
+      `Rate limit hit ${this.rateLimitHitsInWindow} in last minute, adding ${bufferPercent}% buffer`,
+    )
 
     // Only increase if the new limit is higher
     if (adjustedRateLimitMs > this.rateLimitMs) {
@@ -259,7 +272,7 @@ export class RequestQueue {
       this.rateLimitMs = Math.min(adjustedRateLimitMs, this.maxRateLimitMs)
 
       consola.info(
-        `Rate limit increased: ${oldLimit}s → ${newLimit}s (${this.rateLimitHitsInWindow} hits in last minute)`,
+        `Rate limit increased: ${oldLimit}s → ${newLimit}s (${this.rateLimitHitsInWindow} hits in last minute, ${bufferPercent}% buffer)`,
       )
     }
   }
