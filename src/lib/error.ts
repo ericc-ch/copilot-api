@@ -7,10 +7,12 @@ import { RateLimitError } from "./retry"
 
 export class HTTPError extends Error {
   response: Response
+  errorBody?: string
 
-  constructor(message: string, response: Response) {
+  constructor(message: string, response: Response, errorBody?: string) {
     super(message)
     this.response = response
+    this.errorBody = errorBody
   }
 }
 
@@ -42,7 +44,16 @@ export async function forwardError(c: Context, error: unknown) {
   }
 
   if (error instanceof HTTPError) {
-    const errorText = await error.response.text()
+    // Use cached error body if available, otherwise try to read it
+    let errorText = error.errorBody
+    if (!errorText) {
+      try {
+        errorText = await error.response.text()
+      } catch {
+        errorText = "Failed to read error body"
+      }
+    }
+
     let errorJson: unknown
     try {
       errorJson = JSON.parse(errorText)

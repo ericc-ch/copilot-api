@@ -54,15 +54,27 @@ export const createChatCompletions = async (
     }
     consola.error("Response headers:", JSON.stringify(responseHeaders, null, 2))
 
-    // Try to parse and log the error body
+    // Try to parse and log the error body, and store it for later use
+    let errorBodyText: string | undefined
     try {
       const errorBody = await response.json()
-      consola.error("Error body:", JSON.stringify(errorBody, null, 2))
+      errorBodyText = JSON.stringify(errorBody)
+      consola.error("Error body:", errorBodyText)
     } catch {
-      consola.error("Could not parse error body as JSON")
+      // Try to read as text if JSON parsing fails
+      try {
+        errorBodyText = await response.text()
+        consola.error("Error body:", errorBodyText || null)
+      } catch {
+        consola.error("Could not read error body")
+      }
     }
 
-    throw new HTTPError("Failed to create chat completions", response)
+    throw new HTTPError(
+      "Failed to create chat completions",
+      response,
+      errorBodyText,
+    )
   }
 
   if (payload.stream) {
