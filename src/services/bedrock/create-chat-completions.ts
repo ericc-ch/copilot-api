@@ -54,12 +54,23 @@ export const createBedrockChatCompletions = async (
 function translateToBedrockFormat(
   payload: ChatCompletionsPayload,
 ): ConverseCommandInput {
-  // Extract system messages first
+  // Extract system messages first - handle both string and array content
   const systemMessages = payload.messages
     .filter((msg) => msg.role === "system")
-    .map((msg) => ({
-      text: typeof msg.content === "string" ? msg.content : "",
-    }))
+    .map((msg) => {
+      if (typeof msg.content === "string") {
+        return { text: msg.content }
+      }
+      // Handle array content (Anthropic format)
+      if (Array.isArray(msg.content)) {
+        const textContent = msg.content
+          .filter((part): part is TextPart => part.type === "text")
+          .map((part) => part.text)
+          .join("\n")
+        return { text: textContent }
+      }
+      return { text: "" }
+    })
     .filter((msg) => msg.text.trim())
 
   // Process non-system messages, filtering out empty content
