@@ -3,6 +3,8 @@ import type { ContentfulStatusCode } from "hono/utils/http-status"
 
 import consola from "consola"
 
+import { RateLimitError } from "./retry"
+
 export class HTTPError extends Error {
   response: Response
 
@@ -14,6 +16,30 @@ export class HTTPError extends Error {
 
 export async function forwardError(c: Context, error: unknown) {
   consola.error("Error occurred:", error)
+
+  // Handle rate limit errors with detailed retry information
+  if (error instanceof RateLimitError) {
+    const retryAfter = error.retryInfo.retryAfter
+    const message =
+      error.retryInfo.exceeded ?
+        `Rate limit exceeded: ${error.retryInfo.exceeded}. Retry after ${retryAfter} seconds.`
+      : `Rate limit exceeded. Retry after ${retryAfter} seconds.`
+
+    return c.json(
+      {
+        error: {
+          message,
+          type: "rate_limit_error",
+          retry_after: retryAfter,
+          exceeded: error.retryInfo.exceeded,
+        },
+      },
+      429,
+      {
+        "Retry-After": retryAfter.toString(),
+      },
+    )
+  }
 
   if (error instanceof HTTPError) {
     const errorText = await error.response.text()
