@@ -5,6 +5,7 @@ import { streamSSE } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
 import { executeWithRateLimit } from "~/lib/rate-limit"
+import { addRateLimitHeaders } from "~/lib/rate-limit-headers"
 import { state } from "~/lib/state"
 import {
   createChatCompletions,
@@ -41,6 +42,9 @@ export async function handleCompletion(c: Context) {
     }
 
     const response = await createChatCompletions(openAIPayload)
+
+    // Add rate limit headers to response
+    addRateLimitHeaders(c, state)
 
     if (isNonStreaming(response)) {
       consola.debug(

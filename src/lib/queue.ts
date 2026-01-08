@@ -1,6 +1,6 @@
 import consola from "consola"
 
-import { RateLimitError } from "./retry"
+import { addJitter, isRetryableError, RateLimitError } from "./retry"
 
 interface QueueItem<T> {
   execute: () => Promise<T>
@@ -16,12 +16,20 @@ export class RequestQueue {
   private rateLimitMs: number
   private lastProcessedTime = 0
   private maxRetries = 5 // Maximum number of retries for rate limit errors
+  private requestTimeout = 60000 // 60s timeout per request
 
   constructor(rateLimitSeconds?: number) {
     this.rateLimitMs = rateLimitSeconds ? rateLimitSeconds * 1000 : 0
   }
 
   async enqueue<T>(execute: () => Promise<T>): Promise<T> {
+    // Log warning if queue is getting large, but never reject
+    if (this.queue.length > 100) {
+      consola.warn(
+        `Queue depth high: ${this.queue.length} requests waiting. Consider rate limiting.`,
+      )
+    }
+
     // If no rate limit is set, execute immediately with retry handling
     if (this.rateLimitMs === 0) {
       return this.executeWithRetry(execute, 0)
@@ -50,20 +58,28 @@ export class RequestQueue {
     retryCount: number,
   ): Promise<T> {
     try {
-      return await execute()
+      // Execute with timeout
+      return await this.executeWithTimeout(execute)
     } catch (error) {
+      // Check if error is retryable
+      if (!isRetryableError(error)) {
+        consola.debug("Non-retryable error, failing immediately")
+        throw error
+      }
+
+      if (retryCount >= this.maxRetries) {
+        consola.error(`Max retries (${this.maxRetries}) exceeded`)
+        throw error
+      }
+
       // Handle rate limit errors with automatic retry
       if (error instanceof RateLimitError) {
-        if (retryCount >= this.maxRetries) {
-          consola.error(
-            `Max retries (${this.maxRetries}) exceeded for rate limit error`,
-          )
-          throw error
-        }
+        // Add jitter to prevent thundering herd
+        const delayWithJitter = addJitter(error.retryInfo.retryAfter)
+        const waitTimeMs = delayWithJitter * 1000
 
-        const waitTimeMs = error.retryInfo.retryAfter * 1000
         consola.warn(
-          `Rate limit hit (attempt ${retryCount + 1}/${this.maxRetries}). Waiting ${error.retryInfo.retryAfter}s before retry...`,
+          `Rate limit hit (attempt ${retryCount + 1}/${this.maxRetries}). Waiting ${delayWithJitter.toFixed(1)}s before retry...`,
         )
 
         // Dynamically adjust rate limit if needed
@@ -77,9 +93,37 @@ export class RequestQueue {
         return this.executeWithRetry(execute, retryCount + 1)
       }
 
-      // Re-throw non-rate-limit errors
-      throw error
+      // Handle other retryable errors (network errors, timeouts, 5xx)
+      // Use exponential backoff with jitter
+      const baseDelay = 1 // 1 second base
+      const exponentialDelay = baseDelay * 2 ** retryCount // 1s, 2s, 4s, 8s, 16s
+      const delayWithJitter = addJitter(exponentialDelay)
+      const waitTimeMs = delayWithJitter * 1000
+
+      const errorMessage =
+        error instanceof Error ? error.message : String(error)
+      consola.warn(
+        `Transient error (attempt ${retryCount + 1}/${this.maxRetries}): ${errorMessage}. Waiting ${delayWithJitter.toFixed(1)}s before retry...`,
+      )
+
+      await new Promise((resolve) => setTimeout(resolve, waitTimeMs))
+
+      consola.info(`Retrying request after transient error...`)
+      return this.executeWithRetry(execute, retryCount + 1)
     }
+  }
+
+  private async executeWithTimeout<T>(execute: () => Promise<T>): Promise<T> {
+    return Promise.race([
+      execute(),
+      new Promise<T>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(new Error(`Request timeout after ${this.requestTimeout}ms`)),
+          this.requestTimeout,
+        ),
+      ),
+    ])
   }
 
   private async processQueue(): Promise<void> {
@@ -121,36 +165,10 @@ export class RequestQueue {
         item.resolve(result)
         this.lastProcessedTime = Date.now()
       } catch (error) {
-        // If it's a rate limit error and we can retry, re-queue it
-        if (
-          error instanceof RateLimitError
-          && item.retryCount < this.maxRetries
-        ) {
-          const waitTimeMs = error.retryInfo.retryAfter * 1000
-          consola.warn(
-            `Re-queuing request after rate limit (attempt ${item.retryCount + 1}/${this.maxRetries}). Will retry in ${error.retryInfo.retryAfter}s`,
-          )
-
-          // Dynamically adjust rate limit if needed
-          if (error.retryInfo.retryAfter > this.rateLimitMs / 1000) {
-            this.updateRateLimit(error.retryInfo.retryAfter)
-          }
-
-          // Wait and re-queue at the front
-          await new Promise((resolve) => setTimeout(resolve, waitTimeMs))
-          this.queue.unshift({
-            ...item,
-            retryCount: item.retryCount + 1,
-            timestamp: Date.now(),
-          })
-          consola.info(
-            `Request re-queued for retry (${this.queue.length} in queue)`,
-          )
-        } else {
-          consola.error("Error processing queued request:", error)
-          item.reject(error)
-          this.lastProcessedTime = Date.now()
-        }
+        // executeWithRetry already handles retries, so if we get here, all retries failed
+        consola.error("Request failed after all retries:", error)
+        item.reject(error)
+        this.lastProcessedTime = Date.now()
       }
     }
 
@@ -160,6 +178,14 @@ export class RequestQueue {
 
   getQueueSize(): number {
     return this.queue.length
+  }
+
+  getCurrentRateLimitSeconds(): number {
+    return this.rateLimitMs / 1000
+  }
+
+  getLastProcessedTime(): number {
+    return this.lastProcessedTime
   }
 
   updateRateLimit(rateLimitSeconds?: number): void {

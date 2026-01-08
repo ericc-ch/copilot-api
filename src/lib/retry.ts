@@ -6,6 +6,17 @@ export interface RetryInfo {
 }
 
 /**
+ * Add jitter to a delay to prevent thundering herd
+ * @param delaySeconds - Base delay in seconds
+ * @param jitterPercent - Jitter percentage (0.1 = ±10%)
+ * @returns Delay with jitter applied in seconds
+ */
+export function addJitter(delaySeconds: number, jitterPercent = 0.2): number {
+  const jitter = delaySeconds * jitterPercent * (Math.random() - 0.5) * 2
+  return Math.max(0.1, delaySeconds + jitter)
+}
+
+/**
  * Parse Retry-After header from response
  * Can be either seconds (number) or HTTP date (string)
  */
@@ -57,6 +68,66 @@ export class RateLimitError extends Error {
     this.name = "RateLimitError"
     this.retryInfo = retryInfo
   }
+}
+
+/**
+ * Check if an HTTP status code indicates a transient error that should be retried
+ */
+export function isTransientError(statusCode: number): boolean {
+  // Retry on:
+  // - 429 (rate limit - handled specially)
+  // - 500 (internal server error)
+  // - 502 (bad gateway)
+  // - 503 (service unavailable)
+  // - 504 (gateway timeout)
+  return (
+    statusCode === 429
+    || statusCode === 500
+    || statusCode === 502
+    || statusCode === 503
+    || statusCode === 504
+  )
+}
+
+/**
+ * Check if an error is retryable (network errors, timeouts, transient errors)
+ */
+export function isRetryableError(error: unknown): boolean {
+  // Rate limit errors are always retryable
+  if (error instanceof RateLimitError) {
+    return true
+  }
+
+  // Check HTTPError status codes
+  // Note: We need to import HTTPError here, but to avoid circular deps,
+  // we'll check for the response property instead
+  if (
+    error
+    && typeof error === "object"
+    && "response" in error
+    && error.response instanceof Response
+  ) {
+    return isTransientError(error.response.status)
+  }
+
+  // Timeout errors are retryable
+  if (error instanceof Error && error.message.includes("timeout")) {
+    return true
+  }
+
+  // Network errors are retryable (ECONNRESET, ETIMEDOUT, etc.)
+  if (
+    error instanceof Error
+    && (error.message.includes("ECONNRESET")
+      || error.message.includes("ETIMEDOUT")
+      || error.message.includes("ENOTFOUND")
+      || error.message.includes("ECONNREFUSED")
+      || error.message.includes("fetch failed"))
+  ) {
+    return true
+  }
+
+  return false
 }
 
 /**
