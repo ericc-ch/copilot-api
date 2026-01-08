@@ -7,7 +7,6 @@ import { state } from "~/lib/state"
 
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
-  onHeaders?: (headers: Headers) => void,
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
@@ -38,11 +37,6 @@ export const createChatCompletions = async (
   if (!response.ok) {
     consola.error("Failed to create chat completions", response)
     throw new HTTPError("Failed to create chat completions", response)
-  }
-
-  // Call the headers callback if provided
-  if (onHeaders) {
-    onHeaders(response.headers)
   }
 
   if (payload.stream) {

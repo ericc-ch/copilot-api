@@ -5,11 +5,6 @@ import { streamSSE } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
 import { executeWithRateLimit } from "~/lib/rate-limit"
-import {
-  calculateOptimalDelay,
-  logRateLimitInfo,
-  parseRateLimitHeaders,
-} from "~/lib/rate-limit-parser"
 import { state } from "~/lib/state"
 import {
   createChatCompletions,
@@ -45,16 +40,7 @@ export async function handleCompletion(c: Context) {
       await awaitApproval()
     }
 
-    const response = await createChatCompletions(openAIPayload, (headers) => {
-      // Parse rate limit headers and update queue if applicable
-      const rateLimitInfo = parseRateLimitHeaders(headers)
-      logRateLimitInfo(rateLimitInfo)
-
-      const optimalDelay = calculateOptimalDelay(rateLimitInfo)
-      if (optimalDelay !== undefined) {
-        state.requestQueue.updateRateLimit(optimalDelay)
-      }
-    })
+    const response = await createChatCompletions(openAIPayload)
 
     if (isNonStreaming(response)) {
       consola.debug(
