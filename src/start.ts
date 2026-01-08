@@ -156,7 +156,6 @@ export const start = defineCommand({
     "rate-limit": {
       alias: "r",
       type: "string",
-      default: "3",
       description: "Rate limit in seconds between requests",
     },
     wait: {
@@ -164,7 +163,7 @@ export const start = defineCommand({
       type: "boolean",
       default: false,
       description:
-        "Wait instead of error when rate limit is hit. Has no effect if rate limit is not set",
+        "Wait instead of error when rate limit is hit. Only applies when --rate-limit is set",
     },
     "github-token": {
       alias: "g",
