@@ -62,7 +62,7 @@ bun install
 Build image
 
 ```sh
-docker build -t copilot-api .
+docker build -t copilot-api https://github.com/ericc-ch/copilot-api.git#master
 ```
 
 Run the container
@@ -86,7 +86,7 @@ You can pass the GitHub token directly to the container using environment variab
 
 ```sh
 # Build with GitHub token
-docker build --build-arg GH_TOKEN=your_github_token_here -t copilot-api .
+docker build --build-arg GH_TOKEN=your_github_token_here -t copilot-api https://github.com/ericc-ch/copilot-api.git#master 
 
 # Run with GitHub token
 docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here copilot-api
