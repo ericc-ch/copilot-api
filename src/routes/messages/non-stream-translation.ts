@@ -71,6 +71,24 @@ function translateAnthropicMessagesToOpenAI(
   return [...systemMessages, ...otherMessages]
 }
 
+// Anthropic reserved keywords that should not be sent to Copilot API
+const ANTHROPIC_RESERVED_KEYWORDS = [
+  "x-anthropic-billing-header",
+  "x-anthropic-billing",
+]
+
+function filterAnthropicReservedContent(text: string): string {
+  let filtered = text
+  for (const keyword of ANTHROPIC_RESERVED_KEYWORDS) {
+    // Remove lines containing the reserved keyword
+    filtered = filtered
+      .split("\n")
+      .filter((line) => !line.includes(keyword))
+      .join("\n")
+  }
+  return filtered
+}
+
 function handleSystemPrompt(
   system: string | Array<AnthropicTextBlock> | undefined,
 ): Array<Message> {
@@ -78,12 +96,21 @@ function handleSystemPrompt(
     return []
   }
 
-  if (typeof system === "string") {
-    return [{ role: "system", content: system }]
-  } else {
-    const systemText = system.map((block) => block.text).join("\n\n")
-    return [{ role: "system", content: systemText }]
+  let systemText: string
+  systemText =
+    typeof system === "string" ? system : (
+      system.map((block) => block.text).join("\n\n")
+    )
+
+  // Filter out Anthropic reserved keywords
+  systemText = filterAnthropicReservedContent(systemText)
+
+  // Only return system message if there's content left after filtering
+  if (systemText.trim().length === 0) {
+    return []
   }
+
+  return [{ role: "system", content: systemText }]
 }
 
 function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
