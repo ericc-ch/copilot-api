@@ -1,3 +1,5 @@
+import consola from "consola"
+
 import {
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
@@ -48,11 +50,15 @@ export function translateToOpenAI(
 
 function translateModelName(model: string): string {
   // Subagent requests use a specific model number which Copilot doesn't support
-  if (model.startsWith("claude-sonnet-4-")) {
-    return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
-  } else if (model.startsWith("claude-opus-")) {
-    return model.replace(/^claude-opus-4-.*/, "claude-opus-4")
+  if (model.startsWith("claude")) {
+    const newModel = model.replaceAll(
+      /(claude-(?:haiku|sonnet|opus)-\d+)-(\d+)(?:[.-]\d+)?/g,
+      "$1.$2",
+    )
+    consola.log("Use Model:", model, newModel)
+    return newModel
   }
+  consola.log("Use Model:", model)
   return model
 }
 
@@ -60,8 +66,20 @@ function translateAnthropicMessagesToOpenAI(
   anthropicMessages: Array<AnthropicMessage>,
   system: string | Array<AnthropicTextBlock> | undefined,
 ): Array<Message> {
-  const systemMessages = handleSystemPrompt(system)
-
+  let systemMessages = handleSystemPrompt(system)
+  systemMessages = systemMessages.map((it) => {
+    if (
+      typeof it.content === "string"
+      && it.content.startsWith("x-anthropic-billing-header")
+    ) {
+      it.content = it.content.replace(
+        /x-anthropic-billing-header: ?cc_version=.+; ?cc_entrypoint=\w+\n{0,2}/,
+        "",
+      )
+      consola.info('包含"x-anthropic-billing-header"的system消息已被移除')
+    }
+    return it
+  })
   const otherMessages = anthropicMessages.flatMap((message) =>
     message.role === "user" ?
       handleUserMessage(message)

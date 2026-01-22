@@ -18,7 +18,7 @@ export async function handleCountTokens(c: Context) {
     const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
 
     const openAIPayload = translateToOpenAI(anthropicPayload)
-
+    consola.log("OPENAI", JSON.stringify(openAIPayload, null, 2))
     const selectedModel = state.models?.data.find(
       (model) => model.id === anthropicPayload.model,
     )
