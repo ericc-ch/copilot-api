@@ -66,8 +66,20 @@ function translateAnthropicMessagesToOpenAI(
   anthropicMessages: Array<AnthropicMessage>,
   system: string | Array<AnthropicTextBlock> | undefined,
 ): Array<Message> {
-  const systemMessages = handleSystemPrompt(system)
-
+  let systemMessages = handleSystemPrompt(system)
+  systemMessages = systemMessages.map((it) => {
+    if (
+      typeof it.content === "string"
+      && it.content.startsWith("x-anthropic-billing-header")
+    ) {
+      it.content = it.content.replace(
+        /x-anthropic-billing-header: ?cc_version=.+; ?cc_entrypoint=\w+\n{0,2}/,
+        "",
+      )
+      consola.info('包含"x-anthropic-billing-header"的system消息已被移除')
+    }
+    return it
+  })
   const otherMessages = anthropicMessages.flatMap((message) =>
     message.role === "user" ?
       handleUserMessage(message)

@@ -36,6 +36,7 @@ export const createChatCompletions = async (
 
   if (!response.ok) {
     consola.error("Failed to create chat completions", response)
+    // consola.info(JSON.stringify(payload, null, 2))
     throw new HTTPError("Failed to create chat completions", response)
   }
 

@@ -14,12 +14,32 @@ import {
   type ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
 
+function transferablePayload(
+  payload: ChatCompletionsPayload,
+): ChatCompletionsPayload {
+  for (const message of payload.messages) {
+    consola.info(message.role, message.content, typeof message.content)
+    if (
+      message.role === "system"
+      && typeof message.content === "string"
+      && message.content.startsWith("x-anthropic-billing-header")
+    ) {
+      message.content = message.content.replace(
+        /x-anthropic-billing-header: ?cc_version=.+; ?cc_entrypoint=\w+\n{0,2}/,
+        "",
+      )
+      consola.info('包含"x-anthropic-billing-header"的system消息已被移除')
+    }
+  }
+  return payload
+}
+
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   let payload = await c.req.json<ChatCompletionsPayload>()
   consola.debug("Request payload:", JSON.stringify(payload).slice(-400))
-
+  payload = transferablePayload(payload)
   // Find the selected model
   const selectedModel = state.models?.data.find(
     (model) => model.id === payload.model,
