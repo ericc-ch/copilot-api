@@ -197,6 +197,36 @@ describe("Anthropic to OpenAI translation logic", () => {
     expect(assistantMessage?.tool_calls).toHaveLength(1)
     expect(assistantMessage?.tool_calls?.[0].function.name).toBe("get_weather")
   })
+
+  test("should translate claude-opus-4-5-20251101 to claude-opus-4.5", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-opus-4-5-20251101",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 100,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(openAIPayload.model).toBe("claude-opus-4.5")
+  })
+
+  test("should translate claude-sonnet-4-5-20250929 to claude-sonnet-4.5", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-sonnet-4-5-20250929",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 100,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(openAIPayload.model).toBe("claude-sonnet-4.5")
+  })
+
+  test("should translate claude-haiku-4-5-20250929 to claude-haiku-4.5", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-haiku-4-5-20250929",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 100,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(openAIPayload.model).toBe("claude-haiku-4.5")
+  })
 })
 
 describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => {

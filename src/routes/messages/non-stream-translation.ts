@@ -48,7 +48,13 @@ export function translateToOpenAI(
 
 function translateModelName(model: string): string {
   // Subagent requests use a specific model number which Copilot doesn't support
-  if (model.startsWith("claude-sonnet-4-")) {
+  if (/^claude-opus-4-5-\d{8}$/.test(model)) {
+    return "claude-opus-4.5"
+  } else if (/^claude-sonnet-4-5-\d{8}$/.test(model)) {
+    return "claude-sonnet-4.5"
+  } else if (/^claude-haiku-4-5-\d{8}$/.test(model)) {
+    return "claude-haiku-4.5"
+  } else if (model.startsWith("claude-sonnet-4-")) {
     return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
   } else if (model.startsWith("claude-opus-")) {
     return model.replace(/^claude-opus-4-.*/, "claude-opus-4")
