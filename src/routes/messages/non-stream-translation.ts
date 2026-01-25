@@ -79,10 +79,10 @@ function handleSystemPrompt(
   }
 
   if (typeof system === "string") {
-    return [{ role: "system", content: system }]
+    return [{ role: "user", content: system }]
   } else {
     const systemText = system.map((block) => block.text).join("\n\n")
-    return [{ role: "system", content: systemText }]
+    return [{ role: "user", content: systemText }]
   }
 }
 
