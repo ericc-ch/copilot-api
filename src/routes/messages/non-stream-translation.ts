@@ -71,6 +71,20 @@ function translateAnthropicMessagesToOpenAI(
   return [...systemMessages, ...otherMessages]
 }
 
+/**
+ * Reserved keywords that Anthropic's API rejects in system prompts.
+ * These are internal header names that cannot appear in prompt content.
+ * See: https://docs.anthropic.com/en/api/messages
+ */
+const ANTHROPIC_RESERVED_KEYWORDS = ["x-anthropic-billing-header"]
+
+function sanitizeSystemPrompt(text: string): string {
+  return ANTHROPIC_RESERVED_KEYWORDS.reduce(
+    (result, keyword) => result.replaceAll(keyword, ""),
+    text,
+  )
+}
+
 function handleSystemPrompt(
   system: string | Array<AnthropicTextBlock> | undefined,
 ): Array<Message> {
@@ -79,10 +93,10 @@ function handleSystemPrompt(
   }
 
   if (typeof system === "string") {
-    return [{ role: "system", content: system }]
+    return [{ role: "system", content: sanitizeSystemPrompt(system) }]
   } else {
     const systemText = system.map((block) => block.text).join("\n\n")
-    return [{ role: "system", content: systemText }]
+    return [{ role: "system", content: sanitizeSystemPrompt(systemText) }]
   }
 }
 
