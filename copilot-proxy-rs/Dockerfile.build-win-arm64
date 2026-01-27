@@ -1,0 +1,44 @@
+# Cross-compile for Windows ARM64 using xwin + LLVM
+FROM rust:1.85-bookworm AS builder
+
+# Install LLVM and required tools
+RUN apt-get update && apt-get install -y \
+    llvm \
+    clang \
+    lld \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install xwin for Windows SDK
+RUN cargo install xwin@0.6.5 --locked
+
+# Download Windows SDK and CRT for ARM64
+RUN xwin --accept-license --arch aarch64 splat --output /xwin
+
+# Add Windows ARM64 target
+RUN rustup target add aarch64-pc-windows-msvc
+
+WORKDIR /app
+COPY . .
+
+# Configure cargo for cross-compilation
+# xwin uses 'aarch64' folder names
+RUN mkdir -p .cargo && printf '[target.aarch64-pc-windows-msvc]\n\
+linker = "lld-link"\n\
+rustflags = [\n\
+  "-Lnative=/xwin/crt/lib/aarch64",\n\
+  "-Lnative=/xwin/sdk/lib/um/aarch64",\n\
+  "-Lnative=/xwin/sdk/lib/ucrt/aarch64",\n\
+]\n' > .cargo/config.toml
+
+# Set environment for clang cross-compilation
+ENV CC_aarch64_pc_windows_msvc=clang-cl
+ENV CXX_aarch64_pc_windows_msvc=clang-cl
+ENV AR_aarch64_pc_windows_msvc=llvm-lib
+ENV CFLAGS_aarch64_pc_windows_msvc="-I/xwin/crt/include -I/xwin/sdk/include/ucrt -I/xwin/sdk/include/um -I/xwin/sdk/include/shared --target=aarch64-pc-windows-msvc"
+
+# Build
+RUN cargo build --release --target aarch64-pc-windows-msvc
+
+# Output stage
+FROM scratch AS export
+COPY --from=builder /app/target/aarch64-pc-windows-msvc/release/copilot-proxy.exe /

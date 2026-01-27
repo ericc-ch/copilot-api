@@ -1,0 +1,147 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-musl
+            name: linux-arm64
+          - target: x86_64-unknown-linux-musl
+            name: linux-x64
+    
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+      
+      - name: Install musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          fi
+      
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-proxy-${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/copilot-proxy
+
+  build-windows-arm64:
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+      
+      - name: Build
+        run: cargo build --release --target aarch64-pc-windows-msvc
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-proxy-windows-arm64
+          path: target/aarch64-pc-windows-msvc/release/copilot-proxy.exe
+
+  build-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+      
+      - name: Build
+        run: cargo build --release
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-proxy-windows-x64
+          path: target/release/copilot-proxy.exe
+
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            name: macos-arm64
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            name: macos-x64
+            runner: macos-13
+    
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+      
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-proxy-${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/copilot-proxy
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-windows-arm64, build-windows-x64, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          for dir in artifacts/*/; do
+            name=$(basename "$dir")
+            if [[ "$name" == *windows* ]]; then
+              cp "$dir/copilot-proxy.exe" "release/${name}.exe"
+            else
+              cp "$dir/copilot-proxy" "release/${name}"
+              chmod +x "release/${name}"
+            fi
+          done
+          ls -la release/
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true

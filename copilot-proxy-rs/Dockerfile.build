@@ -1,0 +1,20 @@
+# Multi-stage build for ARM64 static binary
+FROM rust:1.84-alpine AS builder
+
+# Install musl tools for static linking
+RUN apk add --no-cache musl-dev
+
+# Add ARM64 target
+RUN rustup target add aarch64-unknown-linux-musl
+
+# Create project structure
+WORKDIR /app
+COPY Cargo.toml .
+COPY src ./src
+
+# Build for ARM64 with static linking
+RUN cargo build --release --target aarch64-unknown-linux-musl
+
+# Output stage - just the binary
+FROM scratch AS export
+COPY --from=builder /app/target/aarch64-unknown-linux-musl/release/copilot-proxy /copilot-proxy

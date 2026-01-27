@@ -1,0 +1,61 @@
+[package]
+name = "copilot-proxy"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+description = "Minimal Copilot → Anthropic API proxy for Claude Code"
+license = "MIT"
+repository = "https://github.com/ericc-ch/copilot-api"
+
+[[bin]]
+name = "copilot-proxy"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime (LTS until Sep 2026)
+tokio = { version = "1.49", features = ["rt-multi-thread", "macros", "fs", "time", "sync"] }
+
+# Web framework with SSE
+axum = { version = "0.8", features = ["tokio"] }
+
+# HTTP client - Rustls is default in 0.13!
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "form"] }
+
+# Bytes type for streaming
+bytes = "1.11"
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async streams
+futures-util = "0.3"
+async-stream = "0.3"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Config storage path
+dirs = "6"
+
+# UUID for request IDs
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true
