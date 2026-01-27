@@ -1,7 +1,7 @@
 use std::time::Duration;
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
-use tracing::info;
+use tracing::{debug, error, info, warn};
 
 use crate::error::AppError;
 
@@ -26,6 +26,7 @@ struct AccessTokenResponse {
 
 pub async fn device_flow_auth(client: &reqwest::Client) -> Result<String> {
     // Step 1: Request device and user codes
+    debug!("Requesting device code from GitHub");
     let resp = client
         .post("https://github.com/login/device/code")
         .header("Accept", "application/json")
@@ -37,7 +38,10 @@ pub async fn device_flow_auth(client: &reqwest::Client) -> Result<String> {
         .await?;
 
     if !resp.status().is_success() {
-        return Err(anyhow!("Failed to get device code: {}", resp.status()));
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        error!("Failed to get device code: {} - {}", status, body);
+        return Err(anyhow!("Failed to get device code: {} - {}", status, body));
     }
 
     let codes: DeviceCodeResponse = resp.json().await?;
@@ -56,6 +60,7 @@ pub async fn device_flow_auth(client: &reqwest::Client) -> Result<String> {
 
     loop {
         if tokio::time::Instant::now() >= deadline {
+            error!("Device code expired before user completed authentication");
             return Err(AppError::AuthError("Device code expired".to_string()).into());
         }
 
@@ -82,20 +87,25 @@ pub async fn device_flow_auth(client: &reqwest::Client) -> Result<String> {
         match token_resp.error.as_deref() {
             Some("authorization_pending") => {
                 // User hasn't authorized yet, keep polling
+                debug!("Waiting for user authorization...");
                 continue;
             }
             Some("slow_down") => {
                 // Slow down polling
+                warn!("GitHub requested slower polling, increasing interval");
                 interval += Duration::from_secs(5);
                 continue;
             }
             Some("expired_token") => {
+                error!("Device code expired");
                 return Err(AppError::AuthError("Device code expired".to_string()).into());
             }
             Some("access_denied") => {
+                error!("User denied access during GitHub authentication");
                 return Err(AppError::AuthError("User denied access".to_string()).into());
             }
             Some(err) => {
+                error!("GitHub OAuth error: {}", err);
                 return Err(AppError::AuthError(err.to_string()).into());
             }
             None => {

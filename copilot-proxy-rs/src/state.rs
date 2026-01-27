@@ -75,6 +75,8 @@ impl AppState {
     pub fn new(github_token: String, account_type: String, port: u16, rate_limit_secs: Option<u64>) -> Self {
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_secs(300)) // 5 min timeout for streaming
+            .pool_idle_timeout(Duration::from_secs(90))
+            .pool_max_idle_per_host(10)
             .build()
             .expect("Failed to build HTTP client");
 
@@ -96,8 +98,10 @@ impl AppState {
         *guard = Some(token);
         drop(guard);
 
+        // Clamp to valid range to prevent integer overflow
+        let expires_in = expires_in_secs.max(0) as u64;
         let mut exp_guard = self.token_expires_at.write().await;
-        *exp_guard = Some(Instant::now() + Duration::from_secs(expires_in_secs as u64));
+        *exp_guard = Some(Instant::now() + Duration::from_secs(expires_in));
     }
 
     pub async fn get_copilot_token(&self) -> Option<String> {

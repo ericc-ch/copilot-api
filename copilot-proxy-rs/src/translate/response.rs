@@ -198,6 +198,7 @@ where
             ..Default::default()
         };
         let mut buffer = String::new();
+        let mut stream_done = false;
 
         let mut stream = Box::pin(byte_stream);
 
@@ -215,8 +216,8 @@ where
 
             // Process complete SSE lines
             while let Some(line_end) = buffer.find('\n') {
-                let line = buffer[..line_end].trim().to_string();
-                buffer = buffer[line_end + 1..].to_string();
+                let line = buffer[..line_end].trim_end().to_string();
+                buffer.drain(..=line_end);
 
                 if line.is_empty() || line.starts_with(':') {
                     continue;
@@ -226,12 +227,14 @@ where
                     let data = &line[6..];
                     
                     if data == "[DONE]" {
+                        stream_done = true;
                         // Close any open content block
                         if state.content_block_open {
                             yield Ok(make_event("content_block_stop", json!({
                                 "type": "content_block_stop",
                                 "index": state.content_block_index
                             })));
+                            state.content_block_open = false;
                         }
 
                         // Send message_delta with stop reason
@@ -255,6 +258,43 @@ where
                     }
                 }
             }
+            
+            if stream_done {
+                break;
+            }
+        }
+
+        // Handle any remaining data in buffer after stream ends (edge case)
+        if !stream_done && !buffer.is_empty() {
+            let line = buffer.trim();
+            if line.starts_with("data: ") {
+                let data = &line[6..];
+                if data != "[DONE]" {
+                    if let Ok(chunk) = serde_json::from_str::<OpenAIChunk>(data) {
+                        for event in process_chunk(&chunk, &mut state) {
+                            yield Ok(event);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Ensure we send closing events if stream ended unexpectedly
+        if !stream_done && state.message_started {
+            if state.content_block_open {
+                yield Ok(make_event("content_block_stop", json!({
+                    "type": "content_block_stop",
+                    "index": state.content_block_index
+                })));
+            }
+            yield Ok(make_event("message_delta", json!({
+                "type": "message_delta",
+                "delta": { "stop_reason": "end_turn", "stop_sequence": null },
+                "usage": { "output_tokens": 0 }
+            })));
+            yield Ok(make_event("message_stop", json!({
+                "type": "message_stop"
+            })));
         }
     }
 }

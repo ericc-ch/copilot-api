@@ -5,6 +5,7 @@ use axum::{
 };
 use serde_json::json;
 use thiserror::Error;
+use tracing::error;
 
 #[derive(Error, Debug)]
 pub enum AppError {
@@ -36,41 +37,71 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_type, message) = match &self {
-            AppError::NoToken => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "authentication_error",
-                self.to_string(),
-            ),
-            AppError::RateLimited => (
-                StatusCode::TOO_MANY_REQUESTS,
-                "rate_limit_error",
-                self.to_string(),
-            ),
-            AppError::AuthError(_) => (
-                StatusCode::UNAUTHORIZED,
-                "authentication_error",
-                self.to_string(),
-            ),
-            AppError::CopilotError(_) => (
-                StatusCode::BAD_GATEWAY,
-                "api_error",
-                self.to_string(),
-            ),
-            AppError::RequestError(_) => (
-                StatusCode::BAD_GATEWAY,
-                "api_error",
-                self.to_string(),
-            ),
-            AppError::JsonError(_) => (
-                StatusCode::BAD_REQUEST,
-                "invalid_request_error",
-                self.to_string(),
-            ),
-            AppError::IoError(_) | AppError::Internal(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
-                self.to_string(),
-            ),
+            AppError::NoToken => {
+                error!("Request failed: no Copilot token available");
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "authentication_error",
+                    self.to_string(),
+                )
+            }
+            AppError::RateLimited => {
+                // Don't log rate limits as errors, they're expected
+                tracing::warn!("Rate limit applied");
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "rate_limit_error",
+                    self.to_string(),
+                )
+            }
+            AppError::AuthError(msg) => {
+                error!("Authentication error: {}", msg);
+                (
+                    StatusCode::UNAUTHORIZED,
+                    "authentication_error",
+                    self.to_string(),
+                )
+            }
+            AppError::CopilotError(msg) => {
+                error!("Copilot API error: {}", msg);
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "api_error",
+                    self.to_string(),
+                )
+            }
+            AppError::RequestError(e) => {
+                error!("HTTP request error: {}", e);
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "api_error",
+                    self.to_string(),
+                )
+            }
+            AppError::JsonError(e) => {
+                error!("JSON parsing error: {}", e);
+                (
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request_error",
+                    self.to_string(),
+                )
+            }
+            AppError::IoError(e) => {
+                error!("IO error: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal_error",
+                    self.to_string(),
+                )
+            }
+            AppError::Internal(msg) => {
+                error!("Internal error: {}", msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal_error",
+                    self.to_string(),
+                )
+            }
         };
 
         // Return Anthropic-style error format

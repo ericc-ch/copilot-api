@@ -91,11 +91,16 @@ async fn main() -> anyhow::Result<()> {
         copilot::token_refresh_loop(state_clone).await;
     });
 
-    // Wait for initial Copilot token
+    // Wait for initial Copilot token with timeout
     info!("Fetching initial Copilot token...");
+    let token_timeout = std::time::Duration::from_secs(60);
+    let token_deadline = tokio::time::Instant::now() + token_timeout;
     loop {
         if state.get_copilot_token().await.is_some() {
             break;
+        }
+        if tokio::time::Instant::now() >= token_deadline {
+            anyhow::bail!("Failed to acquire Copilot token within {}s", token_timeout.as_secs());
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
@@ -110,7 +115,35 @@ async fn main() -> anyhow::Result<()> {
     info!("   Set ANTHROPIC_AUTH_TOKEN=dummy");
     
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("Failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    info!("Shutdown signal received, gracefully shutting down...");
 }

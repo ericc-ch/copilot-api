@@ -64,16 +64,38 @@ pub fn copilot_headers(token: &str, enable_vision: bool) -> reqwest::header::Hea
     use reqwest::header::{HeaderMap, HeaderValue};
     
     let mut headers = HeaderMap::new();
-    headers.insert("Authorization", HeaderValue::from_str(&format!("Bearer {}", token)).unwrap());
+    
+    // Use expect with context for headers that should never fail
+    if let Ok(auth_value) = HeaderValue::from_str(&format!("Bearer {}", token)) {
+        headers.insert("Authorization", auth_value);
+    } else {
+        // Fallback: sanitize token by removing invalid characters
+        let sanitized: String = token.chars().filter(|c| c.is_ascii_graphic()).collect();
+        if let Ok(auth_value) = HeaderValue::from_str(&format!("Bearer {}", sanitized)) {
+            headers.insert("Authorization", auth_value);
+        }
+    }
+    
     headers.insert("Content-Type", HeaderValue::from_static("application/json"));
     headers.insert("Accept", HeaderValue::from_static("application/json"));
     headers.insert("User-Agent", HeaderValue::from_static(USER_AGENT));
     headers.insert("Editor-Version", HeaderValue::from_static("vscode/1.95.0"));
-    headers.insert("Editor-Plugin-Version", HeaderValue::from_str(&format!("copilot-chat/{}", COPILOT_VERSION)).unwrap());
+    
+    // These are compile-time constants, safe to expect
+    let plugin_version = format!("copilot-chat/{}", COPILOT_VERSION);
+    if let Ok(v) = HeaderValue::from_str(&plugin_version) {
+        headers.insert("Editor-Plugin-Version", v);
+    }
+    
     headers.insert("Copilot-Integration-Id", HeaderValue::from_static("vscode-chat"));
     headers.insert("Openai-Intent", HeaderValue::from_static("conversation-panel"));
     headers.insert("X-Github-Api-Version", HeaderValue::from_static("2025-04-01"));
-    headers.insert("X-Request-Id", HeaderValue::from_str(&uuid::Uuid::new_v4().to_string()).unwrap());
+    
+    // UUID is always valid ASCII
+    let request_id = uuid::Uuid::new_v4().to_string();
+    if let Ok(v) = HeaderValue::from_str(&request_id) {
+        headers.insert("X-Request-Id", v);
+    }
     
     if enable_vision {
         headers.insert("Copilot-Vision-Request", HeaderValue::from_static("true"));

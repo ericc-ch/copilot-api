@@ -18,8 +18,8 @@ tokio = { version = "1.49", features = ["rt-multi-thread", "macros", "fs", "time
 # Web framework with SSE
 axum = { version = "0.8", features = ["tokio"] }
 
-# HTTP client - Rustls is default in 0.13!
-reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "form"] }
+# HTTP client with Rustls TLS
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "form", "rustls-tls"] }
 
 # Bytes type for streaming
 bytes = "1.11"

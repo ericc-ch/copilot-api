@@ -62,6 +62,7 @@ pub async fn handle_messages(
             .await
             .map_err(|e| {
                 state.stats.inc_errors();
+                tracing::error!("Failed to send streaming request to Copilot: {}", e);
                 e
             })?;
 
@@ -69,7 +70,7 @@ pub async fn handle_messages(
             state.stats.inc_errors();
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            error!("Copilot API error: {} - {}", status, body);
+            // Error will be logged in AppError::into_response
             return Err(AppError::CopilotError(format!("{}: {}", status, body)));
         }
 
@@ -90,6 +91,7 @@ pub async fn handle_messages(
             .await
             .map_err(|e| {
                 state.stats.inc_errors();
+                tracing::error!("Failed to send request to Copilot: {}", e);
                 e
             })?;
 
@@ -97,11 +99,15 @@ pub async fn handle_messages(
             state.stats.inc_errors();
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            error!("Copilot API error: {} - {}", status, body);
+            // Error will be logged in AppError::into_response
             return Err(AppError::CopilotError(format!("{}: {}", status, body)));
         }
 
-        let openai_response: OpenAIResponse = response.json().await?;
+        let openai_response: OpenAIResponse = response.json().await.map_err(|e| {
+            state.stats.inc_errors();
+            tracing::error!("Failed to parse Copilot response: {}", e);
+            e
+        })?;
         let anthropic_response = translate_non_streaming(openai_response, &payload.model);
 
         Ok(Json(anthropic_response).into_response())
