@@ -50,6 +50,7 @@ export async function handleCompletion(c: Context) {
   const response = await createChatCompletions(payload)
 
   if (isNonStreaming(response)) {
+    response.object = "chat.completion"
     consola.debug("Non-streaming response:", JSON.stringify(response))
     return c.json(response)
   }
