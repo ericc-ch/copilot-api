@@ -45,6 +45,11 @@ const chatCompletionRequestSchema = z.object({
     .optional()
     .nullable(),
   stream: z.boolean().optional().nullable(),
+  stream_options: z
+    .object({
+      include_usage: z.boolean().optional(),
+    })
+    .optional(),
   temperature: z.number().min(0).max(2).optional().nullable(),
   top_p: z.number().min(0).max(1).optional().nullable(),
   tools: z.array(z.any()).optional(),
@@ -110,6 +115,18 @@ describe("Anthropic to OpenAI translation logic", () => {
       max_tokens: 0,
     }
     const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+  })
+
+  test("should include stream_options when streaming", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Stream it" }],
+      max_tokens: 16,
+      stream: true,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(openAIPayload.stream_options).toEqual({ include_usage: true })
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
   })
 

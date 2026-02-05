@@ -29,7 +29,7 @@ import { mapOpenAIStopReasonToAnthropic } from "./utils"
 export function translateToOpenAI(
   payload: AnthropicMessagesPayload,
 ): ChatCompletionsPayload {
-  return {
+  const openAIPayload: ChatCompletionsPayload = {
     model: translateModelName(payload.model),
     messages: translateAnthropicMessagesToOpenAI(
       payload.messages,
@@ -44,6 +44,12 @@ export function translateToOpenAI(
     tools: translateAnthropicToolsToOpenAI(payload.tools),
     tool_choice: translateAnthropicToolChoiceToOpenAI(payload.tool_choice),
   }
+
+  if (payload.stream) {
+    openAIPayload.stream_options = { include_usage: true }
+  }
+
+  return openAIPayload
 }
 
 function translateModelName(model: string): string {
