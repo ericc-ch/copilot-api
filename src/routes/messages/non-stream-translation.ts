@@ -43,6 +43,7 @@ export function translateToOpenAI(
     user: payload.metadata?.user_id,
     tools: translateAnthropicToolsToOpenAI(payload.tools),
     tool_choice: translateAnthropicToolChoiceToOpenAI(payload.tool_choice),
+    reasoning_effort: payload.reasoning_effort,
   }
 
   if (payload.stream) {

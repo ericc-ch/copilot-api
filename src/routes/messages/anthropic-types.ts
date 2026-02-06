@@ -18,6 +18,7 @@ export interface AnthropicMessagesPayload {
     type: "auto" | "any" | "tool" | "none"
     name?: string
   }
+  reasoning_effort?: "low" | "medium" | "high"
   thinking?: {
     type: "enabled"
     budget_tokens?: number

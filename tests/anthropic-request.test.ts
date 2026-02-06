@@ -214,6 +214,19 @@ describe("Anthropic to OpenAI translation logic", () => {
     expect(assistantMessage?.tool_calls).toHaveLength(1)
     expect(assistantMessage?.tool_calls?.[0].function.name).toBe("get_weather")
   })
+
+  test("should map reasoning_effort to OpenAI payload", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.6",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 16,
+      reasoning_effort: "high",
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(openAIPayload.reasoning_effort).toBe("high")
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+  })
 })
 
 describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => {

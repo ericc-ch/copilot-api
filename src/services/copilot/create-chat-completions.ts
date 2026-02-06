@@ -137,6 +137,7 @@ export interface ChatCompletionsPayload {
     include_usage?: boolean
   } | null
 
+  reasoning_effort?: "low" | "medium" | "high" | "xhigh" | null
   frequency_penalty?: number | null
   presence_penalty?: number | null
   logit_bias?: Record<string, number> | null
