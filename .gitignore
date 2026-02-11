@@ -11,4 +11,4 @@ node_modules/
 .eslintcache
 
 # build output
-dist/
+dist/.DS_Store

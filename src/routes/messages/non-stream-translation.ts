@@ -239,9 +239,24 @@ function translateAnthropicToolsToOpenAI(
     function: {
       name: tool.name,
       description: tool.description,
-      parameters: tool.input_schema,
+      parameters: normalizeToolParameters(tool.input_schema),
     },
   }))
+}
+
+function normalizeToolParameters(
+  inputSchema: unknown,
+): Record<string, unknown> {
+  if (!inputSchema || typeof inputSchema !== "object") {
+    return { type: "object", properties: {} }
+  }
+
+  const schema = { ...inputSchema } as Record<string, unknown>
+  if (schema.type === "object" && schema.properties === undefined) {
+    return { ...schema, properties: {} }
+  }
+
+  return schema
 }
 
 function translateAnthropicToolChoiceToOpenAI(
