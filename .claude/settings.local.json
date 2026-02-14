@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:developers.openai.com)",
+      "WebSearch",
+      "WebFetch(domain:platform.openai.com)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__get-library-docs",
+      "Bash(bun run typecheck)",
+      "Bash(where:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx typescript:*)",
+      "Bash(node_modules/.bin/tsc:*)",
+      "Bash(ls:*)",
+      "Bash(bun run lint:all:*)",
+      "Bash(bun run lint)",
+      "Bash(bun test:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(bun run build)"
+    ]
+  }
+}
