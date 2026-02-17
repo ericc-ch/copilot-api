@@ -1,0 +1,12 @@
+services:
+  copilot-api:
+    image: copilot-api
+    ports:
+      - "3000:3000"
+      - "4141:4141"
+    volumes:
+      - copilot-api-data:/root/.local/share/copilot-api
+    restart: unless-stopped
+
+volumes:
+  copilot-api-data:

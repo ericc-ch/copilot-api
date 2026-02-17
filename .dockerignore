@@ -11,3 +11,6 @@ tests/
 *.md
 
 .eslintcache
+
+web/node_modules
+web/dist
