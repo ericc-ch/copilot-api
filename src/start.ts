@@ -25,6 +25,7 @@ interface RunServerOptions {
   claudeCode: boolean
   showToken: boolean
   proxyEnv: boolean
+  enterpriseUrl?: string
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -46,6 +47,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.rateLimitSeconds = options.rateLimit
   state.rateLimitWait = options.rateLimitWait
   state.showToken = options.showToken
+  if (options.enterpriseUrl) state.enterpriseUrl = options.enterpriseUrl
 
   await ensurePaths()
   await cacheVSCodeVersion()
@@ -54,7 +56,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     state.githubToken = options.githubToken
     consola.info("Using provided GitHub token")
   } else {
-    await setupGitHubToken()
+    await setupGitHubToken({ enterpriseUrl: options.enterpriseUrl })
   }
 
   await setupCopilotToken()
@@ -117,6 +119,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   serve({
     fetch: server.fetch as ServerHandler,
     port: options.port,
+    bun: {
+      idleTimeout: 0,
+    },
   })
 }
 
@@ -184,6 +189,11 @@ export const start = defineCommand({
       default: false,
       description: "Initialize proxy from environment variables",
     },
+    "enterprise-url": {
+      type: "string",
+      description:
+        "GitHub Enterprise host to use (eg. https://ghe.example.com or ghe.example.com)",
+    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
@@ -202,6 +212,7 @@ export const start = defineCommand({
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
       proxyEnv: args["proxy-env"],
+      enterpriseUrl: args["enterprise-url"],
     })
   },
 })

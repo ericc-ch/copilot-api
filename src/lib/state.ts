@@ -3,6 +3,7 @@ import type { ModelsResponse } from "~/services/copilot/get-models"
 export interface State {
   githubToken?: string
   copilotToken?: string
+  enterpriseUrl?: string
 
   accountType: string
   models?: ModelsResponse
@@ -22,4 +23,5 @@ export const state: State = {
   manualApprove: false,
   rateLimitWait: false,
   showToken: false,
+  enterpriseUrl: undefined,
 }

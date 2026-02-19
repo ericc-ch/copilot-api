@@ -3,9 +3,12 @@ import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
 export const getCopilotUsage = async (): Promise<CopilotUsageResponse> => {
-  const response = await fetch(`${GITHUB_API_BASE_URL}/copilot_internal/user`, {
-    headers: githubHeaders(state),
-  })
+  const response = await fetch(
+    `${GITHUB_API_BASE_URL()}/copilot_internal/user`,
+    {
+      headers: githubHeaders(state),
+    },
+  )
 
   if (!response.ok) {
     throw new HTTPError("Failed to get Copilot usage", response)

@@ -73,6 +73,9 @@ const calculateMessageTokens = (
   const tokensPerName = 1
   let tokens = tokensPerMessage
   for (const [key, value] of Object.entries(message)) {
+    if (key === "reasoning_opaque") {
+      continue
+    }
     if (typeof value === "string") {
       tokens += encoder.encode(value).length
     }
