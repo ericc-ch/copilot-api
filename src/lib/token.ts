@@ -57,9 +57,22 @@ export async function setupGitHubToken(
       if (state.showToken) {
         consola.info("GitHub token:", githubToken)
       }
-      await logUser()
 
-      return
+      try {
+        await logUser()
+        return
+      } catch (error) {
+        // If the stored token is invalid (401), clear it and fall through to re-auth
+        if (error instanceof HTTPError && error.response.status === 401) {
+          consola.warn(
+            "Stored GitHub token is invalid, re-authenticating...",
+          )
+          state.githubToken = ""
+          await fs.unlink(PATHS.GITHUB_TOKEN_PATH).catch(() => {})
+        } else {
+          throw error
+        }
+      }
     }
 
     consola.info("Not logged in, getting new access token")
