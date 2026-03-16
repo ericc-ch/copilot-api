@@ -13,6 +13,7 @@ import { state } from "./lib/state"
 import { setupCopilotToken, setupGitHubToken } from "./lib/token"
 import { cacheModels, cacheVSCodeVersion } from "./lib/utils"
 import { server } from "./server"
+import modelConsumptionData from "./lib/model-consumption.json"
 
 interface RunServerOptions {
   port: number
@@ -60,8 +61,72 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   await setupCopilotToken()
   await cacheModels()
 
+  // Initial fetch of usage information for premium interactions tracking
+  const { forceRefreshUsage, getCurrentUsagePercent } = await import(
+    "./lib/refresh-usage"
+  )
+  await forceRefreshUsage()
+
+  const usagePercent = getCurrentUsagePercent()
+  if (usagePercent !== null && state.premiumInteractions) {
+    consola.info(
+      `Premium interactions usage: ${usagePercent.toFixed(1)}% (${state.premiumInteractions.remaining}/${state.premiumInteractions.entitlement} remaining)`,
+    )
+  }
+
+  // consola.info(
+  //   `Full Model Info:\n${
+  //     state.models?.data
+  //       ?.filter(model => model.model_picker_enabled === true)
+  //       .map(model => {
+  //         const { 
+  //           capabilities, 
+  //           policy, 
+  //           vendor, 
+  //           preview, 
+  //           model_picker_enabled,
+  //           object,
+  //           ...rest } = model;
+  //         let fullInfo = JSON.stringify(rest, null, 2);
+  //         return `- ${model.id}\n${fullInfo}`;
+  //       }).join("\n")
+  //   }`
+  // )
+
+  // Create a map for quick consumption lookup
+  const consumptionMap = new Map(
+    modelConsumptionData.models.map(m => [m.name, m.consumption])
+  );
+
+  // Helper function to convert consumption string to number for sorting
+  const consumptionToNumber = (consumption: string): number => {
+    if (consumption === "N/A") return 999; // Put N/A at the end
+    const match = consumption.match(/^([\d.]+)x$/);
+    return match ? Number.parseFloat(match[1]) : 999;
+  };
+
   consola.info(
-    `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
+    `Available models:\n${
+      state.models?.data
+        .map(model => {
+          let maxTokens = model.capabilities?.limits?.max_context_window_tokens;
+          let maxTokensStr = "N/A";
+          if (typeof maxTokens === "number") {
+            maxTokensStr = maxTokens >= 1000 ? `${maxTokens / 1000}k` : `${maxTokens}`;
+          }
+          const consumption = consumptionMap.get(model.name) || "N/A";
+          return { model, maxTokensStr, consumption };
+        })
+        .filter(item => item.maxTokensStr !== "N/A")
+        .sort((a, b) => consumptionToNumber(a.consumption) - consumptionToNumber(b.consumption))
+        .map((item, i) => {
+          const consumptionStr = `(${item.consumption})`.padEnd(8, " ");
+          const idStr = item.model.id.padEnd(24, " ");
+          const nameStr = item.model.name.padEnd(32, " ");
+          const contextStr = `context: ${item.maxTokensStr}`;
+          return `${i + 1}.\t${consumptionStr}${idStr}\t${nameStr}\t${contextStr}`;
+        }).join("\n")
+    }`
   )
 
   const serverUrl = `http://localhost:${options.port}`

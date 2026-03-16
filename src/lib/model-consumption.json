@@ -1,0 +1,32 @@
+{
+"models": [
+{"name": "GPT-4.1", "consumption": "0x"},
+{"name": "GPT-4o", "consumption": "0x"},
+{"name": "GPT-5 mini", "consumption": "0x"},
+{"name": "Grok Code Fast 1", "consumption": "0x"},
+{"name": "Claude Haiku 4.5", "consumption": "0.33x"},
+{"name": "Claude Sonnet 4", "consumption": "1x"},
+{"name": "Claude Sonnet 4.5", "consumption": "1x"},
+{"name": "Gemini 2.5 Pro", "consumption": "1x"},
+{"name": "GPT-5", "consumption": "1x"},
+{"name": "GPT-5-Codex (Preview)", "consumption": "1x"},
+{"name": "GPT-5.1", "consumption": "1x"},
+{"name": "GPT-5.1-Codex", "consumption": "1x"},
+{"name": "GPT-5.1-Codex-Mini", "consumption": "0.33x"},
+{"name": "Gemini 3 Pro (Preview)", "consumption": "1x"},
+{"name": "Raptor mini (Preview)", "consumption": "0x"},
+{"name": "GPT-5.1-Codex-Max (Preview)", "consumption": "1x"},
+{"name": "Claude Opus 4.5 (Preview)", "consumption": "1x"},
+{"name": "GPT-5.2 (Preview)", "consumption": "1x"},
+{"name": "GPT-5.1-Codex-Max", "consumption": "1x"},
+{"name": "Claude Opus 4.5", "consumption": "3x"},
+{"name": "Gemini 3 Flash (Preview)", "consumption": "1x"},
+{"name": "GPT-5.2", "consumption": "1x"},
+{"name": "GPT-5.2-Codex", "consumption": "1x"},
+{"name": "Claude Opus 4.6", "consumption": "3x"},
+{"name": "Claude Sonnet 4.6", "consumption":"1x"},
+{"name": "Gemini 3.1 Pro", "consumption": "1x"},
+{"name": "GPT-5.3-Codex", "consumption": "1x"},
+{"name": "GPT-5.4", "consumption":"1x"}
+]
+}

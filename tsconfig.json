@@ -6,6 +6,7 @@
     "skipLibCheck": true,
 
     "allowJs": true,
+    "resolveJsonModule": true,
     "moduleResolution": "Bundler",
     "moduleDetection": "force",
     "erasableSyntaxOnly": true,

@@ -1,4 +1,5 @@
 import type { ModelsResponse } from "~/services/copilot/get-models"
+import type { QuotaDetail } from "~/services/github/get-copilot-usage"
 
 export interface State {
   githubToken?: string
@@ -15,6 +16,9 @@ export interface State {
   // Rate limiting configuration
   rateLimitSeconds?: number
   lastRequestTimestamp?: number
+
+  // Usage information
+  premiumInteractions?: QuotaDetail
 }
 
 export const state: State = {

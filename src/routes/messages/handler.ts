@@ -4,7 +4,9 @@ import consola from "consola"
 import { streamSSE } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
+import { validateAndReplaceModel } from "~/lib/model-matcher"
 import { checkRateLimit } from "~/lib/rate-limit"
+import { refreshUsage } from "~/lib/refresh-usage"
 import { state } from "~/lib/state"
 import {
   createChatCompletions,
@@ -23,6 +25,9 @@ import {
 import { translateChunkToAnthropicEvents } from "./stream-translation"
 
 export async function handleCompletion(c: Context) {
+  // Refresh usage information before processing request
+  await refreshUsage()
+
   await checkRateLimit(state)
 
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
@@ -33,6 +38,19 @@ export async function handleCompletion(c: Context) {
     "Translated OpenAI request payload:",
     JSON.stringify(openAIPayload),
   )
+
+  // Log the requested model
+  consola.info(`Requested model: ${openAIPayload.model}`)
+
+  // Validate and potentially replace model
+  const validation = validateAndReplaceModel(openAIPayload.model)
+
+  if (!validation.success) {
+    return c.json({ error: validation.error }, 400)
+  }
+
+  // Replace model if a match was found
+  openAIPayload.model = validation.model!
 
   if (state.manualApprove) {
     await awaitApproval()

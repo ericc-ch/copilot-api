@@ -27,5 +27,10 @@ server.route("/v1/chat/completions", completionRoutes)
 server.route("/v1/models", modelRoutes)
 server.route("/v1/embeddings", embeddingRoutes)
 
+// Compatibility with tools that expect api/v0/ prefix
+server.route("/api/v0/models", modelRoutes)
+server.route("/api/v0/chat/completions", completionRoutes)
+server.route("/api/v0/embeddings", embeddingRoutes)
+
 // Anthropic compatible endpoints
 server.route("/v1/messages", messageRoutes)

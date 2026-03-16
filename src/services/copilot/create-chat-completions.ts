@@ -35,7 +35,29 @@ export const createChatCompletions = async (
   })
 
   if (!response.ok) {
-    consola.error("Failed to create chat completions", response)
+    const errorBody = await response.text()
+    consola.error(`Failed to create chat completions for model: ${payload.model}`)
+    consola.error(`Response status: ${response.status} ${response.statusText}`)
+    consola.error(`Response body: ${errorBody}`)
+    
+    // Try to parse error details
+    try {
+      const errorJson = JSON.parse(errorBody)
+      if (errorJson.error?.message) {
+        consola.error(`Error message: ${errorJson.error.message}`)
+        
+        // If model not supported, list available models
+        if (errorJson.error.code === "model_not_supported") {
+          const availableModels = state.models?.data
+            .filter((m) => typeof m.capabilities?.limits?.max_context_window_tokens === "number")
+            .map((m) => m.id)
+          consola.error(`Available models: ${availableModels?.join(", ")}`)
+        }
+      }
+    } catch {
+      // If parsing fails, we already logged the raw body
+    }
+    
     throw new HTTPError("Failed to create chat completions", response)
   }
 

@@ -4,7 +4,9 @@ import consola from "consola"
 import { streamSSE, type SSEMessage } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
+import { validateAndReplaceModel } from "~/lib/model-matcher"
 import { checkRateLimit } from "~/lib/rate-limit"
+import { refreshUsage } from "~/lib/refresh-usage"
 import { state } from "~/lib/state"
 import { getTokenCount } from "~/lib/tokenizer"
 import { isNullish } from "~/lib/utils"
@@ -15,10 +17,26 @@ import {
 } from "~/services/copilot/create-chat-completions"
 
 export async function handleCompletion(c: Context) {
+  // Refresh usage information before processing request
+  await refreshUsage()
+
   await checkRateLimit(state)
 
   let payload = await c.req.json<ChatCompletionsPayload>()
   consola.debug("Request payload:", JSON.stringify(payload).slice(-400))
+
+  // Log the requested model
+  consola.info(`Requested model: ${payload.model}`)
+
+  // Validate and potentially replace model
+  const validation = validateAndReplaceModel(payload.model)
+
+  if (!validation.success) {
+    return c.json({ error: validation.error }, 400)
+  }
+
+  // Replace model if a match was found
+  payload.model = validation.model!
 
   // Find the selected model
   const selectedModel = state.models?.data.find(

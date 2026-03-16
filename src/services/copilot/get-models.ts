@@ -9,7 +9,12 @@ export const getModels = async () => {
 
   if (!response.ok) throw new HTTPError("Failed to get models", response)
 
-  return (await response.json()) as ModelsResponse
+  const result = await response.json() as ModelsResponse
+  result.data = result.data.filter(
+    (model: any) =>
+      model.model_picker_category !== undefined && model.model_picker_enabled === true
+  )
+  return result
 }
 
 export interface ModelsResponse {
@@ -48,6 +53,7 @@ export interface Model {
   preview: boolean
   vendor: string
   version: string
+  model_picker_category?: string
   policy?: {
     state: string
     terms: string
