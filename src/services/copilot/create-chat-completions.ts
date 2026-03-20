@@ -5,12 +5,83 @@ import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
+/**
+ * Copilot does not support external image URLs — only base64 data URIs.
+ * This function downloads an external URL and converts it to a base64 data URI.
+ */
+async function fetchImageAsBase64(url: string): Promise<string> {
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image from URL: ${url}`)
+  }
+  const contentType = response.headers.get("content-type") ?? "image/jpeg"
+  const buffer = await response.arrayBuffer()
+  const base64 = Buffer.from(buffer).toString("base64")
+  return `data:${contentType};base64,${base64}`
+}
+
+/**
+ * Rewrite any external image_url entries in the payload to base64 data URIs
+ * so Copilot can process them.
+ */
+async function resolveExternalImages(
+  payload: ChatCompletionsPayload,
+): Promise<ChatCompletionsPayload> {
+  const hasExternalUrls = payload.messages.some(
+    (msg) =>
+      Array.isArray(msg.content)
+      && msg.content.some(
+        (part) =>
+          part.type === "image_url" && !part.image_url.url.startsWith("data:"),
+      ),
+  )
+
+  if (!hasExternalUrls) return payload
+
+  const resolvedMessages = await Promise.all(
+    payload.messages.map(async (msg) => {
+      if (!Array.isArray(msg.content)) return msg
+
+      const resolvedContent = await Promise.all(
+        msg.content.map(async (part) => {
+          if (
+            part.type !== "image_url"
+            || part.image_url.url.startsWith("data:")
+          ) {
+            return part
+          }
+          try {
+            const base64Url = await fetchImageAsBase64(part.image_url.url)
+            return {
+              ...part,
+              image_url: { ...part.image_url, url: base64Url },
+            }
+          } catch (err) {
+            consola.warn(
+              `Failed to fetch external image, skipping: ${part.image_url.url}`,
+              err,
+            )
+            return part
+          }
+        }),
+      )
+
+      return { ...msg, content: resolvedContent }
+    }),
+  )
+
+  return { ...payload, messages: resolvedMessages }
+}
+
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
-  const enableVision = payload.messages.some(
+  // Resolve external image URLs to base64 before sending to Copilot
+  const resolvedPayload = await resolveExternalImages(payload)
+
+  const enableVision = resolvedPayload.messages.some(
     (x) =>
       typeof x.content !== "string"
       && x.content?.some((x) => x.type === "image_url"),
@@ -18,7 +89,7 @@ export const createChatCompletions = async (
 
   // Agent/user check for X-Initiator header
   // Determine if any message is from an agent ("assistant" or "tool")
-  const isAgentCall = payload.messages.some((msg) =>
+  const isAgentCall = resolvedPayload.messages.some((msg) =>
     ["assistant", "tool"].includes(msg.role),
   )
 
@@ -31,15 +102,19 @@ export const createChatCompletions = async (
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
     method: "POST",
     headers,
-    body: JSON.stringify(payload),
+    body: JSON.stringify(resolvedPayload),
   })
 
   if (!response.ok) {
-    consola.error("Failed to create chat completions", response)
-    throw new HTTPError("Failed to create chat completions", response)
+    const body = await response.text()
+    consola.error(
+      `Failed to create chat completions [model=${resolvedPayload.model}]`,
+      body,
+    )
+    throw new HTTPError("Failed to create chat completions", response, body)
   }
 
-  if (payload.stream) {
+  if (resolvedPayload.stream) {
     return events(response)
   }
 

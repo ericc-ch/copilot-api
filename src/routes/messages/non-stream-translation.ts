@@ -47,13 +47,46 @@ export function translateToOpenAI(
 }
 
 function translateModelName(model: string): string {
-  // Subagent requests use a specific model number which Copilot doesn't support
-  if (model.startsWith("claude-sonnet-4-")) {
-    return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
-  } else if (model.startsWith("claude-opus-")) {
-    return model.replace(/^claude-opus-4-.*/, "claude-opus-4")
+  // Claude Code appends various suffixes that Copilot doesn't recognize.
+  // Strip them to get the base model ID that Copilot accepts.
+  //
+  // Known suffixes:
+  //   "[1m]"      — extended thinking / 1M token context variant
+  //                 e.g. "claude-opus-4.6[1m]" → "claude-opus-4.6"
+  //   "-YYYYMMDD" — date-stamped model versions from Anthropic API
+  //                 e.g. "claude-sonnet-4-20250514" → "claude-sonnet-4"
+  //
+  // Copilot uses dot-notation for minor versions (e.g. "claude-haiku-4.5")
+  // but Claude Code sends hyphen-notation (e.g. "claude-haiku-4-5").
+  // Convert the trailing "-N" minor version to ".N".
+
+  let result = model
+
+  // Strip bracket suffixes like [1m], [thinking], etc.
+  const bracketSuffixPattern = /\[.*\]$/
+  if (bracketSuffixPattern.test(result)) {
+    result = result.replace(bracketSuffixPattern, "")
   }
-  return model
+
+  // Strip date suffixes in either compact or dashed form:
+  //   -20250514       (8 consecutive digits, e.g. from Anthropic API)
+  //   -2025-04-14     (YYYY-MM-DD, e.g. "gpt-4.1-2025-04-14" from OpenAI)
+  const dateSuffixPattern = /(-\d{8}|-\d{4}-\d{2}-\d{2})$/
+  if (dateSuffixPattern.test(result)) {
+    result = result.replace(dateSuffixPattern, "")
+  }
+
+  // Convert hyphen minor version to dot: "claude-haiku-4-5" → "claude-haiku-4.5"
+  // Only applies when the last two segments are both short numbers (1-2 digits),
+  // to avoid mismatching version-like segments in model names that already had
+  // their date suffix stripped (e.g. "gpt-4.1" should stay as-is).
+  const hyphenMinorVersionPattern = /^(.*-\d+)-(\d{1,2})$/
+  const match = hyphenMinorVersionPattern.exec(result)
+  if (match) {
+    result = `${match[1]}.${match[2]}`
+  }
+
+  return result
 }
 
 function translateAnthropicMessagesToOpenAI(
@@ -71,6 +104,25 @@ function translateAnthropicMessagesToOpenAI(
   return [...systemMessages, ...otherMessages]
 }
 
+// Copilot rejects system prompts containing these reserved Anthropic-internal keywords.
+// Claude Code injects them as metadata headers inside the system prompt.
+const COPILOT_RESERVED_KEYWORDS = [
+  "<x-anthropic-billing-header>",
+  "x-anthropic-billing-header",
+]
+
+function sanitizeSystemPrompt(text: string): string {
+  // Remove lines containing reserved Copilot keywords
+  const lines = text.split("\n")
+  const filtered = lines.filter(
+    (line) =>
+      !COPILOT_RESERVED_KEYWORDS.some((kw) =>
+        line.toLowerCase().includes(kw.toLowerCase()),
+      ),
+  )
+  return filtered.join("\n").trim()
+}
+
 function handleSystemPrompt(
   system: string | Array<AnthropicTextBlock> | undefined,
 ): Array<Message> {
@@ -79,10 +131,14 @@ function handleSystemPrompt(
   }
 
   if (typeof system === "string") {
-    return [{ role: "system", content: system }]
+    const content = sanitizeSystemPrompt(system)
+    if (!content) return []
+    return [{ role: "system", content }]
   } else {
     const systemText = system.map((block) => block.text).join("\n\n")
-    return [{ role: "system", content: systemText }]
+    const content = sanitizeSystemPrompt(systemText)
+    if (!content) return []
+    return [{ role: "system", content }]
   }
 }
 
@@ -103,7 +159,7 @@ function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
       newMessages.push({
         role: "tool",
         tool_call_id: block.tool_use_id,
-        content: mapContent(block.content),
+        content: mapToolResultContent(block.content),
       })
     }
 
@@ -174,6 +230,33 @@ function handleAssistantMessage(
           content: mapContent(message.content),
         },
       ]
+}
+
+function mapToolResultContent(
+  content: AnthropicToolResultBlock["content"],
+): string | Array<ContentPart> | null {
+  if (typeof content === "string") {
+    return content
+  }
+  // Array of text/image blocks — flatten to a string or content parts
+  const hasImage = content.some((block) => block.type === "image")
+  if (!hasImage) {
+    return content
+      .filter((block): block is AnthropicTextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("\n\n")
+  }
+  return content.map((block) => {
+    if (block.type === "text") {
+      return { type: "text" as const, text: block.text }
+    }
+    return {
+      type: "image_url" as const,
+      image_url: {
+        url: `data:${block.source.media_type};base64,${block.source.data}`,
+      },
+    }
+  })
 }
 
 function mapContent(

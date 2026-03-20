@@ -13,6 +13,7 @@ import {
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
+import { createChatCompletionsViaResponses } from "~/services/copilot/create-responses"
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
@@ -47,7 +48,23 @@ export async function handleCompletion(c: Context) {
     consola.debug("Set max_tokens to:", JSON.stringify(payload.max_tokens))
   }
 
-  const response = await createChatCompletions(payload)
+  // Some models (e.g. gpt-5.4, gpt-5.x-codex) only support /responses, not
+  // /chat/completions.  Route them through the responses adapter instead.
+  const supportedEndpoints = selectedModel?.supported_endpoints ?? []
+  const useResponsesEndpoint =
+    supportedEndpoints.length > 0 &&
+    supportedEndpoints.includes("/responses") &&
+    !supportedEndpoints.includes("/chat/completions")
+
+  if (useResponsesEndpoint) {
+    consola.info(
+      `Model "${payload.model}" only supports /responses — routing via responses adapter`,
+    )
+  }
+
+  const response = useResponsesEndpoint
+    ? await createChatCompletionsViaResponses(payload)
+    : await createChatCompletions(payload)
 
   if (isNonStreaming(response)) {
     consola.debug("Non-streaming response:", JSON.stringify(response))
@@ -66,3 +83,4 @@ export async function handleCompletion(c: Context) {
 const isNonStreaming = (
   response: Awaited<ReturnType<typeof createChatCompletions>>,
 ): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
+

@@ -51,10 +51,44 @@ https://github.com/user-attachments/assets/7654b383-669d-4eb9-b23c-06d7aefee8c5
 
 ## Installation
 
-To install dependencies, run:
+### Global Installation (Recommended)
+
+Install `copilot-api` globally so you can use it as a command anywhere:
+
+```sh
+# Using npm
+npm install -g copilot-api
+
+# Using bun
+bun install -g copilot-api
+```
+
+Once installed, run it directly:
+
+```sh
+copilot-api start
+```
+
+### Using npx (No Install Required)
+
+Run without installing using npx — always fetches the latest version:
+
+```sh
+npx copilot-api@latest start
+```
+
+### Installing from Source
+
+Clone the repository and install dependencies:
 
 ```sh
 bun install
+```
+
+Then link it globally so the `copilot-api` command is available system-wide:
+
+```sh
+npm link
 ```
 
 ## Using with Docker
@@ -342,6 +376,76 @@ bun run dev
 bun run start
 ```
 
+### Build from Source
+
+To compile the project into `dist/`:
+
+```sh
+bun run build
+```
+
+Then run the compiled output:
+
+```sh
+bun dist/main.js start
+```
+
+## Console Mode (Multi-Account Management)
+
+Console mode starts a web UI for managing multiple GitHub Copilot accounts with load balancing.
+
+### 1. Build the Web UI (first time only)
+
+```sh
+cd web && bun install && bun run build
+cd ..
+```
+
+### 2. Start Console Mode
+
+```sh
+bun run start console --web-port 3000 --proxy-port 4141
+```
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `--web-port` / `-w` | Port for the web management console | 3000 |
+| `--proxy-port` / `-p` | Port for the proxy API endpoints | 4141 |
+| `--auto-start` | Auto-start enabled accounts on launch | true |
+| `--verbose` / `-v` | Enable verbose logging | false |
+
+### 3. Set Up Admin Account
+
+Open `http://localhost:3000` in your browser. On first visit you will be prompted to create an admin username and password (minimum 6 characters).
+
+### 4. Add Accounts
+
+Click **Add Account** in the dashboard and authenticate via GitHub Device Flow, or paste a GitHub token directly.
+
+### 5. Using the API Key
+
+After adding and starting an account, each account has its own **API Key** shown on its card.
+
+**Single-account mode** (use a specific account's key):
+
+```
+Base URL: http://localhost:4141/v1
+API Key:  <account API key from the dashboard>
+```
+
+**Pool mode** (load-balance across all enabled accounts):
+
+Enable Pool in the dashboard to get a shared API Key. Choose a strategy:
+- `round-robin` — distribute requests evenly across accounts
+- `priority` — route to the highest-priority available account
+
+```
+Base URL: http://localhost:4141/v1
+API Key:  <pool API key from the dashboard>
+```
+
+Both keys are used as a standard Bearer token. They work with any OpenAI-compatible or Anthropic-compatible client — just point the client's base URL to `http://localhost:4141/v1` and set the API key accordingly.
+
 ## Usage Tips
 
 - To avoid hitting GitHub Copilot's rate limits, you can use the following flags:
@@ -349,3 +453,13 @@ bun run start
   - `--rate-limit <seconds>`: Enforces a minimum time interval between requests. For example, `copilot-api start --rate-limit 30` will ensure there's at least a 30-second gap between requests.
   - `--wait`: Use this with `--rate-limit`. It makes the server wait for the cooldown period to end instead of rejecting the request with an error. This is useful for clients that don't automatically retry on rate limit errors.
 - If you have a GitHub business or enterprise plan account with Copilot, use the `--account-type` flag (e.g., `--account-type business`). See the [official documentation](https://docs.github.com/en/enterprise-cloud@latest/copilot/managing-copilot/managing-github-copilot-in-your-organization/managing-access-to-github-copilot-in-your-organization/managing-github-copilot-access-to-your-organizations-network#configuring-copilot-subscription-based-network-routing-for-your-enterprise-or-organization) for more details.
+
+
+## Important commands with Claude code
+
+curl -fsSL https://bun.sh/install | bash   
+cd web && bun install && bun run build   
+cd ..   
+bun run start console --web-port 3000 --proxy-port 4141   
+vi ~/.claude/settings.json   
+set api key in settings.json with the key copied in http://localhost:3000   

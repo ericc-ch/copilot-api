@@ -4,4 +4,5 @@ export default config({
   prettier: {
     plugins: ["prettier-plugin-packagejson"],
   },
+  ignores: ["web/**"],
 })
