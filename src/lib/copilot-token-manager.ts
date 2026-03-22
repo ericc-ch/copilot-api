@@ -31,8 +31,9 @@ class CopilotTokenManager {
       try {
         await this.refreshPromise
       } catch (error) {
+        const nowAfterRefresh = Date.now() / 1000
         const stillValid =
-          Boolean(state.copilotToken) && this.tokenExpiresAt - now > 5
+          Boolean(state.copilotToken) && this.tokenExpiresAt - nowAfterRefresh > 5
         if (stillValid && state.copilotToken) {
           consola.warn(
             "[CopilotTokenManager] Refresh failed but current token is still valid, using cached token:",
