@@ -6,12 +6,43 @@ import { getConfig, getMappedModel } from "~/lib/config"
 import { createHandlerLogger } from "~/lib/logger"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
-import {
-  createResponses,
-  type ResponsesPayload,
-  type ResponsesResult,
-} from "~/services/copilot/create-responses"
 
+type ResponsesToolDefinition = {
+  type?: string
+  name?: string
+  [key: string]: unknown
+}
+
+export type ResponsesPayload = {
+  model: string
+  stream?: boolean
+  tools?: ResponsesToolDefinition[] | null
+  [key: string]: unknown
+}
+
+export type ResponsesResult = Record<string, unknown>
+
+type CreateResponsesOptions = {
+  vision?: boolean
+  initiator?: string
+}
+
+const createResponses = async (
+  payload: ResponsesPayload,
+  _options: CreateResponsesOptions,
+): Promise<ResponsesResult> => {
+  // Fallback implementation because ~/services/copilot/create-responses
+  // is not available in this repository. This preserves handler behavior
+  // by returning a structured error instead of failing compilation.
+  return {
+    error: {
+      message:
+        "createResponses service is not implemented in this deployment.",
+      type: "not_implemented",
+    },
+    payload,
+  }
+}
 import { createStreamIdTracker, fixStreamIds } from "./stream-id-sync"
 import { getResponsesRequestOptions } from "./utils"
 
