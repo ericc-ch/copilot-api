@@ -88,7 +88,10 @@ class CopilotTokenManager {
     }
 
     // Schedule refresh 60 seconds before the recommended refresh time
-    const refreshMs = Math.max((refreshIn - 60) * 1000, 60000) // At least 1 minute
+    const refreshMs = Math.min(
+      refreshIn * 1000,
+      Math.max((refreshIn - 60) * 1000, 60000), // At least 1 minute
+    )
 
     consola.debug(
       `[CopilotTokenManager] Scheduling next refresh in ${Math.round(refreshMs / 1000)}s`,
