@@ -117,6 +117,11 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   serve({
     fetch: server.fetch as ServerHandler,
     port: options.port,
+    bun: {
+      // Disable idle timeout to prevent Bun from closing SSE/streaming connections
+      // Default is 10 seconds which kills long-running LLM streams
+      idleTimeout: 0,
+    },
   })
 }
 

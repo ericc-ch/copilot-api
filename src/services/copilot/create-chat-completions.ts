@@ -1,5 +1,4 @@
 import consola from "consola"
-import { events } from "fetch-event-stream"
 
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
@@ -40,7 +39,7 @@ export const createChatCompletions = async (
   }
 
   if (payload.stream) {
-    return events(response)
+    return response
   }
 
   return (await response.json()) as ChatCompletionResponse

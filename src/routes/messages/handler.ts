@@ -1,6 +1,7 @@
 import type { Context } from "hono"
 
 import consola from "consola"
+import { events } from "fetch-event-stream"
 import { streamSSE } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
@@ -9,7 +10,6 @@ import { state } from "~/lib/state"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
-  type ChatCompletionResponse,
 } from "~/services/copilot/create-chat-completions"
 
 import {
@@ -40,52 +40,50 @@ export async function handleCompletion(c: Context) {
 
   const response = await createChatCompletions(openAIPayload)
 
-  if (isNonStreaming(response)) {
-    consola.debug(
-      "Non-streaming response from Copilot:",
-      JSON.stringify(response).slice(-400),
-    )
-    const anthropicResponse = translateToAnthropic(response)
-    consola.debug(
-      "Translated Anthropic response:",
-      JSON.stringify(anthropicResponse),
-    )
-    return c.json(anthropicResponse)
+  // Streaming: response is a raw fetch Response
+  if (response instanceof Response) {
+    consola.debug("Streaming response from Copilot")
+    return streamSSE(c, async (stream) => {
+      const streamState: AnthropicStreamState = {
+        messageStartSent: false,
+        contentBlockIndex: 0,
+        contentBlockOpen: false,
+        toolCalls: {},
+      }
+
+      for await (const rawEvent of events(response)) {
+        consola.debug("Copilot raw stream event:", JSON.stringify(rawEvent))
+        if (rawEvent.data === "[DONE]") {
+          break
+        }
+
+        if (!rawEvent.data) {
+          continue
+        }
+
+        const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
+        const sseEvents = translateChunkToAnthropicEvents(chunk, streamState)
+
+        for (const event of sseEvents) {
+          consola.debug("Translated Anthropic event:", JSON.stringify(event))
+          await stream.writeSSE({
+            event: event.type,
+            data: JSON.stringify(event),
+          })
+        }
+      }
+    })
   }
 
-  consola.debug("Streaming response from Copilot")
-  return streamSSE(c, async (stream) => {
-    const streamState: AnthropicStreamState = {
-      messageStartSent: false,
-      contentBlockIndex: 0,
-      contentBlockOpen: false,
-      toolCalls: {},
-    }
-
-    for await (const rawEvent of response) {
-      consola.debug("Copilot raw stream event:", JSON.stringify(rawEvent))
-      if (rawEvent.data === "[DONE]") {
-        break
-      }
-
-      if (!rawEvent.data) {
-        continue
-      }
-
-      const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
-      const events = translateChunkToAnthropicEvents(chunk, streamState)
-
-      for (const event of events) {
-        consola.debug("Translated Anthropic event:", JSON.stringify(event))
-        await stream.writeSSE({
-          event: event.type,
-          data: JSON.stringify(event),
-        })
-      }
-    }
-  })
+  // Non-streaming: response is a parsed JSON object
+  consola.debug(
+    "Non-streaming response from Copilot:",
+    JSON.stringify(response).slice(-400),
+  )
+  const anthropicResponse = translateToAnthropic(response)
+  consola.debug(
+    "Translated Anthropic response:",
+    JSON.stringify(anthropicResponse),
+  )
+  return c.json(anthropicResponse)
 }
-
-const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
-): response is ChatCompletionResponse => Object.hasOwn(response, "choices")

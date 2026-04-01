@@ -1,7 +1,6 @@
 import type { Context } from "hono"
 
 import consola from "consola"
-import { streamSSE, type SSEMessage } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
 import { checkRateLimit } from "~/lib/rate-limit"
@@ -10,7 +9,6 @@ import { getTokenCount } from "~/lib/tokenizer"
 import { isNullish } from "~/lib/utils"
 import {
   createChatCompletions,
-  type ChatCompletionResponse,
   type ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
 
@@ -39,7 +37,23 @@ export async function handleCompletion(c: Context) {
 
   if (state.manualApprove) await awaitApproval()
 
-  if (isNullish(payload.max_tokens)) {
+  // Normalize max_completion_tokens to max_tokens for upstream compatibility
+  const payloadAny = payload as unknown as Record<string, unknown>
+  if (
+    payloadAny.max_completion_tokens !== null
+    && payloadAny.max_completion_tokens !== undefined
+    && isNullish(payload.max_tokens)
+  ) {
+    payload = {
+      ...payload,
+      max_tokens: payloadAny.max_completion_tokens as number,
+    }
+    delete (payload as unknown as Record<string, unknown>).max_completion_tokens
+    consola.debug(
+      "Normalized max_completion_tokens to max_tokens:",
+      payload.max_tokens,
+    )
+  } else if (isNullish(payload.max_tokens)) {
     payload = {
       ...payload,
       max_tokens: selectedModel?.capabilities.limits.max_output_tokens,
@@ -49,20 +63,44 @@ export async function handleCompletion(c: Context) {
 
   const response = await createChatCompletions(payload)
 
-  if (isNonStreaming(response)) {
-    consola.debug("Non-streaming response:", JSON.stringify(response))
-    return c.json(response)
+  // Streaming: response is a raw fetch Response — pipe body directly
+  if (response instanceof Response) {
+    const startTime = Date.now()
+    let byteCount = 0
+    let chunkCount = 0
+
+    const monitor = new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk: Uint8Array, controller) {
+        chunkCount++
+        byteCount += chunk.byteLength
+        if (chunkCount === 1) {
+          consola.info(`TTFT: ${Date.now() - startTime}ms`)
+        }
+        controller.enqueue(chunk)
+      },
+      flush() {
+        consola.info(
+          `Stream complete: ${chunkCount} chunks, ${byteCount} bytes in ${Date.now() - startTime}ms`,
+        )
+      },
+    })
+
+    const body = response.body
+    if (!body) {
+      return c.text("No response body", 502)
+    }
+
+    return new Response(body.pipeThrough(monitor), {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    })
   }
 
-  consola.debug("Streaming response")
-  return streamSSE(c, async (stream) => {
-    for await (const chunk of response) {
-      consola.debug("Streaming chunk:", JSON.stringify(chunk))
-      await stream.writeSSE(chunk as SSEMessage)
-    }
-  })
+  // Non-streaming: response is a parsed JSON object
+  consola.debug("Non-streaming response:", JSON.stringify(response))
+  return c.json(response)
 }
-
-const isNonStreaming = (
-  response: Awaited<ReturnType<typeof createChatCompletions>>,
-): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
