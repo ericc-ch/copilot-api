@@ -52,6 +52,8 @@ function translateModelName(model: string): string {
     return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
   } else if (model.startsWith("claude-opus-")) {
     return model.replace(/^claude-opus-4-.*/, "claude-opus-4")
+  } else if (model.startsWith("claude-haiku-4-5") || model.startsWith("claude-haiku-4.5")) {
+    return "claude-haiku-4.5"
   }
   return model
 }
