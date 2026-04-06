@@ -15,6 +15,11 @@ export interface State {
   // Rate limiting configuration
   rateLimitSeconds?: number
   lastRequestTimestamp?: number
+
+  // Authentication configuration
+  authEnabled: boolean
+  apiKeys: Array<string>
+  skipAuthPaths: Array<string>
 }
 
 export const state: State = {
@@ -22,4 +27,7 @@ export const state: State = {
   manualApprove: false,
   rateLimitWait: false,
   showToken: false,
+  authEnabled: false,
+  apiKeys: [],
+  skipAuthPaths: ["/", "/health"],
 }

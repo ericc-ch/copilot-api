@@ -40,6 +40,92 @@ A reverse-engineered proxy for the GitHub Copilot API that exposes it as an Open
 - **Flexible Authentication**: Authenticate interactively or provide a GitHub token directly, suitable for CI/CD environments.
 - **Support for Different Account Types**: Works with individual, business, and enterprise GitHub Copilot plans.
 
+## Authentication
+
+The Copilot API proxy supports API key authentication to protect your endpoints from unauthorized access. This is especially important if you're exposing the proxy over a network.
+
+### Setting Up Authentication
+
+Authentication is enabled automatically when you provide an API key. There are several ways to configure it:
+
+**Option 1: Environment Variable (Recommended)**
+
+```sh
+export COPILOT_API_KEY="your-secret-api-key"
+npx copilot-api@latest start
+```
+
+**Option 2: Command Line Argument**
+
+```sh
+npx copilot-api@latest start --api-key "your-secret-api-key"
+```
+
+**Option 3: Multiple Keys**
+
+For key rotation or multi-user setups, use comma-separated keys:
+
+```sh
+export COPILOT_API_KEYS="key1,key2,key3"
+npx copilot-api@latest start
+```
+
+### Making Authenticated Requests
+
+When authentication is enabled, include your API key in requests using one of these methods:
+
+**Authorization Header (Recommended)**
+
+```sh
+curl http://localhost:4141/v1/models \
+  -H "Authorization: Bearer your-secret-api-key"
+```
+
+**X-API-Key Header**
+
+```sh
+curl http://localhost:4141/v1/models \
+  -H "x-api-key: your-secret-api-key"
+```
+
+### Health Check Endpoints
+
+The following endpoints are always accessible without authentication:
+
+- `GET /` - Server status check
+- `GET /health` - Health check endpoint
+
+### Disabling Authentication
+
+For local development, you can disable authentication:
+
+```sh
+npx copilot-api@latest start --no-auth
+```
+
+> **Warning**: Never use `--no-auth` when exposing the proxy to a network. Always use API key authentication for any non-local deployments.
+
+### Using with Claude Code
+
+When using the `--claude-code` flag, the generated command will automatically include your API key:
+
+```sh
+export COPILOT_API_KEY="your-secret-api-key"
+npx copilot-api@latest start --claude-code
+```
+
+For manual configuration in `.claude/settings.json`, set the auth token to your API key:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:4141",
+    "ANTHROPIC_AUTH_TOKEN": "your-secret-api-key",
+    "ANTHROPIC_MODEL": "gpt-4.1"
+  }
+}
+```
+
 ## Demo
 
 https://github.com/user-attachments/assets/7654b383-669d-4eb9-b23c-06d7aefee8c5
@@ -91,6 +177,9 @@ docker build --build-arg GH_TOKEN=your_github_token_here -t copilot-api .
 # Run with GitHub token
 docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here copilot-api
 
+# Run with GitHub token and API authentication
+docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here -e COPILOT_API_KEY=your_api_key copilot-api
+
 # Run with additional options
 docker run -p 4141:4141 -e GH_TOKEN=your_token copilot-api start --verbose --port 4141
 ```
@@ -106,6 +195,7 @@ services:
       - "4141:4141"
     environment:
       - GH_TOKEN=your_github_token_here
+      - COPILOT_API_KEY=your_api_key_here
     restart: unless-stopped
 ```
 
@@ -163,6 +253,8 @@ The following command line options are available for the `start` command:
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
 | --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
+| --api-key      | API key for authentication                                                    | none       | -k    |
+| --no-auth      | Disable authentication (for local development only)                          | false      | none  |
 
 ### Auth Command Options
 
@@ -207,7 +299,6 @@ New endpoints for monitoring your Copilot usage and quotas.
 | Endpoint     | Method | Description                                                  |
 | ------------ | ------ | ------------------------------------------------------------ |
 | `GET /usage` | `GET`  | Get detailed Copilot usage statistics and quota information. |
-| `GET /token` | `GET`  | Get the current Copilot token being used by the API.         |
 
 ## Example Usage
 
