@@ -6,6 +6,7 @@ import consola from "consola"
 import { serve, type ServerHandler } from "srvx"
 import invariant from "tiny-invariant"
 
+import { createAuthConfig } from "./lib/auth-config"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
 import { generateEnvScript } from "./lib/shell"
@@ -25,6 +26,8 @@ interface RunServerOptions {
   claudeCode: boolean
   showToken: boolean
   proxyEnv: boolean
+  apiKey?: string
+  noAuth: boolean
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -47,10 +50,30 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.rateLimitWait = options.rateLimitWait
   state.showToken = options.showToken
 
+  // Configure authentication
+  const authConfig = createAuthConfig({
+    apiKey: options.apiKey,
+    noAuth: options.noAuth,
+  })
+  state.authEnabled = authConfig.authEnabled
+  state.apiKeys = authConfig.apiKeys
+  state.skipAuthPaths = authConfig.skipAuthPaths
+
+  if (state.authEnabled) {
+    consola.info(
+      `Authentication enabled with ${state.apiKeys.length} API key(s)`,
+    )
+  } else if (options.noAuth) {
+    consola.warn("Authentication disabled via --no-auth flag")
+  } else {
+    consola.warn("No API keys configured - authentication disabled")
+  }
+
   await ensurePaths()
   await cacheVSCodeVersion()
 
   if (options.githubToken) {
+    // eslint-disable-next-line require-atomic-updates -- False positive: no async between check and assign
     state.githubToken = options.githubToken
     consola.info("Using provided GitHub token")
   } else {
@@ -88,7 +111,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     const command = generateEnvScript(
       {
         ANTHROPIC_BASE_URL: serverUrl,
-        ANTHROPIC_AUTH_TOKEN: "dummy",
+        ANTHROPIC_AUTH_TOKEN: state.apiKeys[0] ?? "dummy",
         ANTHROPIC_MODEL: selectedModel,
         ANTHROPIC_DEFAULT_SONNET_MODEL: selectedModel,
         ANTHROPIC_SMALL_FAST_MODEL: selectedSmallModel,
@@ -184,6 +207,17 @@ export const start = defineCommand({
       default: false,
       description: "Initialize proxy from environment variables",
     },
+    "api-key": {
+      alias: "k",
+      type: "string",
+      description:
+        "API key for authentication (can also use COPILOT_API_KEY env var)",
+    },
+    "no-auth": {
+      type: "boolean",
+      default: false,
+      description: "Disable authentication (for local development only)",
+    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
@@ -202,6 +236,8 @@ export const start = defineCommand({
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
       proxyEnv: args["proxy-env"],
+      apiKey: args["api-key"],
+      noAuth: args["no-auth"],
     })
   },
 })
