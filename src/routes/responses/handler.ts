@@ -6,6 +6,7 @@ import { streamSSE, type SSEMessage } from "hono/streaming"
 import { awaitApproval } from "~/lib/approval"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
+import { getResponsesTokenCount } from "~/lib/tokenizer"
 import {
   createResponses,
   type ResponsesApiResponse,
@@ -15,10 +16,36 @@ import {
 export async function handleResponses(c: Context) {
   await checkRateLimit(state)
 
-  const payload = await c.req.json<ResponsesPayload>()
+  let payload = await c.req.json<ResponsesPayload>()
   consola.debug("Responses payload:", JSON.stringify(payload).slice(-400))
 
+  const selectedModel = state.models?.data.find(
+    (model) => model.id === payload.model,
+  )
+
+  try {
+    if (selectedModel) {
+      const tokenCount = await getResponsesTokenCount(payload, selectedModel)
+      consola.info("Current token count:", tokenCount)
+    } else {
+      consola.warn("No model selected, skipping token count calculation")
+    }
+  } catch (error) {
+    consola.warn("Failed to calculate token count:", error)
+  }
+
   if (state.manualApprove) await awaitApproval()
+
+  if (payload.max_output_tokens == null) {
+    payload = {
+      ...payload,
+      max_output_tokens: selectedModel?.capabilities.limits.max_output_tokens,
+    }
+    consola.debug(
+      "Set max_output_tokens to:",
+      JSON.stringify(payload.max_output_tokens),
+    )
+  }
 
   const response = await createResponses(payload)
 

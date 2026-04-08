@@ -5,6 +5,7 @@ import type {
   Tool,
   ToolCall,
 } from "~/services/copilot/create-chat-completions"
+import type { ResponsesPayload } from "~/services/copilot/create-responses"
 import type { Model } from "~/services/copilot/get-models"
 
 // Encoder type mapping
@@ -344,5 +345,38 @@ export const getTokenCount = async (
   return {
     input: inputTokens,
     output: outputTokens,
+  }
+}
+
+const countUnknownTokens = (value: unknown, encoder: Encoder): number => {
+  if (value === null || value === undefined) {
+    return 0
+  }
+  if (typeof value === "string") {
+    return encoder.encode(value).length
+  }
+  return encoder.encode(JSON.stringify(value)).length
+}
+
+/**
+ * Estimate token count for Responses API payloads using the model tokenizer.
+ */
+export const getResponsesTokenCount = async (
+  payload: ResponsesPayload,
+  model: Model,
+): Promise<{ input: number; output: number }> => {
+  const tokenizer = getTokenizerFromModel(model)
+  const encoder = await getEncodeChatFunction(tokenizer)
+
+  let inputTokens = 0
+  inputTokens += countUnknownTokens(payload.input, encoder)
+  inputTokens += countUnknownTokens(payload.instructions, encoder)
+  inputTokens += countUnknownTokens(payload.tools, encoder)
+  inputTokens += countUnknownTokens(payload.text, encoder)
+  inputTokens += countUnknownTokens(payload.reasoning, encoder)
+
+  return {
+    input: inputTokens,
+    output: 0,
   }
 }
