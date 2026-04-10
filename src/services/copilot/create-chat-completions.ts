@@ -5,12 +5,29 @@ import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
 
+const GPT_5_4_MODEL_PATTERN = /(^|[^a-z0-9])gpt[-_.]?5[-_.]?4(?:$|[^a-z0-9])/i
+
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
-  const enableVision = payload.messages.some(
+  const normalizedPayload = normalizeChatCompletionsPayload(payload)
+  consola.debug("Upstream token parameter routing:", {
+    model: payload.model,
+    inputMaxTokens: payload.max_tokens,
+    inputMaxCompletionTokens: payload.max_completion_tokens,
+    upstreamTokenField:
+      normalizedPayload.max_completion_tokens !== undefined ?
+        "max_completion_tokens"
+      : normalizedPayload.max_tokens !== undefined ?
+          "max_tokens"
+        : null,
+    upstreamMaxTokens: normalizedPayload.max_tokens,
+    upstreamMaxCompletionTokens: normalizedPayload.max_completion_tokens,
+  })
+
+  const enableVision = normalizedPayload.messages.some(
     (x) =>
       typeof x.content !== "string"
       && x.content?.some((x) => x.type === "image_url"),
@@ -18,7 +35,7 @@ export const createChatCompletions = async (
 
   // Agent/user check for X-Initiator header
   // Determine if any message is from an agent ("assistant" or "tool")
-  const isAgentCall = payload.messages.some((msg) =>
+  const isAgentCall = normalizedPayload.messages.some((msg) =>
     ["assistant", "tool"].includes(msg.role),
   )
 
@@ -31,7 +48,7 @@ export const createChatCompletions = async (
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
     method: "POST",
     headers,
-    body: JSON.stringify(payload),
+    body: JSON.stringify(normalizedPayload),
   })
 
   if (!response.ok) {
@@ -39,11 +56,31 @@ export const createChatCompletions = async (
     throw new HTTPError("Failed to create chat completions", response)
   }
 
-  if (payload.stream) {
+  if (normalizedPayload.stream) {
     return events(response)
   }
 
   return (await response.json()) as ChatCompletionResponse
+}
+
+function normalizeChatCompletionsPayload(
+  payload: ChatCompletionsPayload,
+): ChatCompletionsPayload {
+  const resolvedMaxTokens = payload.max_tokens ?? payload.max_completion_tokens
+  const useMaxCompletionTokens = shouldUseMaxCompletionTokens(payload.model)
+
+  return {
+    ...payload,
+    max_tokens: useMaxCompletionTokens ? undefined : resolvedMaxTokens,
+    max_completion_tokens: useMaxCompletionTokens ? resolvedMaxTokens : undefined,
+  }
+}
+
+function shouldUseMaxCompletionTokens(modelId: string): boolean {
+  const resolvedModelId =
+    state.models?.data.find((model) => model.id === modelId)?.id ?? modelId
+
+  return GPT_5_4_MODEL_PATTERN.test(resolvedModelId)
 }
 
 // Streaming types
@@ -130,6 +167,7 @@ export interface ChatCompletionsPayload {
   temperature?: number | null
   top_p?: number | null
   max_tokens?: number | null
+  max_completion_tokens?: number | null
   stop?: string | Array<string> | null
   n?: number | null
   stream?: boolean | null

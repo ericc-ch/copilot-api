@@ -2,8 +2,7 @@ import { describe, test, expect } from "bun:test"
 import { z } from "zod"
 
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
-
-import { translateToOpenAI } from "../src/routes/messages/non-stream-translation"
+import { translateToOpenAI } from "~/routes/messages/non-stream-translation"
 
 // Zod schema for a single message in the chat completion request.
 const messageSchema = z.object({
@@ -31,6 +30,7 @@ const chatCompletionRequestSchema = z.object({
   logprobs: z.boolean().optional().nullable(),
   top_logprobs: z.number().int().min(0).max(20).optional().nullable(),
   max_tokens: z.number().int().optional().nullable(),
+  max_completion_tokens: z.number().int().optional().nullable(),
   n: z.number().int().min(1).max(128).optional().nullable(),
   presence_penalty: z.number().min(-2).max(2).optional().nullable(),
   response_format: z
@@ -72,6 +72,8 @@ describe("Anthropic to OpenAI translation logic", () => {
 
     const openAIPayload = translateToOpenAI(anthropicPayload)
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+    expect(openAIPayload.max_tokens).toBeUndefined()
+    expect(openAIPayload.max_completion_tokens).toBe(0)
   })
 
   test("should translate comprehensive Anthropic payload to valid OpenAI payload", () => {
@@ -101,6 +103,8 @@ describe("Anthropic to OpenAI translation logic", () => {
     }
     const openAIPayload = translateToOpenAI(anthropicPayload)
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+    expect(openAIPayload.max_tokens).toBeUndefined()
+    expect(openAIPayload.max_completion_tokens).toBe(150)
   })
 
   test("should handle missing fields gracefully", () => {
@@ -111,6 +115,35 @@ describe("Anthropic to OpenAI translation logic", () => {
     }
     const openAIPayload = translateToOpenAI(anthropicPayload)
     expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+    expect(openAIPayload.max_tokens).toBeUndefined()
+    expect(openAIPayload.max_completion_tokens).toBe(0)
+  })
+
+  test("should map max_tokens into max_completion_tokens", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 128,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.max_tokens).toBeUndefined()
+    expect(openAIPayload.max_completion_tokens).toBe(128)
+  })
+
+  test("should prefer max_tokens when both token fields are present", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 128,
+      max_completion_tokens: 64,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.max_tokens).toBeUndefined()
+    expect(openAIPayload.max_completion_tokens).toBe(128)
   })
 
   test("should handle invalid types in Anthropic payload", () => {

@@ -4,6 +4,7 @@ export interface AnthropicMessagesPayload {
   model: string
   messages: Array<AnthropicMessage>
   max_tokens: number
+  max_completion_tokens?: number
   system?: string | Array<AnthropicTextBlock>
   metadata?: {
     user_id?: string

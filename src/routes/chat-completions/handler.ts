@@ -39,13 +39,21 @@ export async function handleCompletion(c: Context) {
 
   if (state.manualApprove) await awaitApproval()
 
-  if (isNullish(payload.max_tokens)) {
-    payload = {
-      ...payload,
-      max_tokens: selectedModel?.capabilities.limits.max_output_tokens,
-    }
-    consola.debug("Set max_tokens to:", JSON.stringify(payload.max_tokens))
+  const resolvedMaxTokens = !isNullish(payload.max_tokens) ?
+      payload.max_tokens
+    : !isNullish(payload.max_completion_tokens) ?
+        payload.max_completion_tokens
+      : selectedModel?.capabilities.limits.max_output_tokens
+
+  payload = {
+    ...payload,
+    max_tokens: undefined,
+    max_completion_tokens: resolvedMaxTokens,
   }
+  consola.debug(
+    "Set max_completion_tokens to:",
+    JSON.stringify(payload.max_completion_tokens),
+  )
 
   const response = await createChatCompletions(payload)
 

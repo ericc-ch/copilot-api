@@ -29,13 +29,15 @@ import { mapOpenAIStopReasonToAnthropic } from "./utils"
 export function translateToOpenAI(
   payload: AnthropicMessagesPayload,
 ): ChatCompletionsPayload {
+  const maxTokens = payload.max_tokens ?? payload.max_completion_tokens
+
   return {
     model: translateModelName(payload.model),
     messages: translateAnthropicMessagesToOpenAI(
       payload.messages,
       payload.system,
     ),
-    max_tokens: payload.max_tokens,
+    max_completion_tokens: maxTokens,
     stop: payload.stop_sequences,
     stream: payload.stream,
     temperature: payload.temperature,
