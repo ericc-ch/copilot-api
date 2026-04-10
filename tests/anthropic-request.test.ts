@@ -3,6 +3,7 @@ import { z } from "zod"
 
 import type { AnthropicMessagesPayload } from "~/routes/messages/anthropic-types"
 
+import { state } from "../src/lib/state"
 import { translateToOpenAI } from "../src/routes/messages/non-stream-translation"
 
 // Zod schema for a single message in the chat completion request.
@@ -63,6 +64,76 @@ function isValidChatCompletionRequest(payload: unknown): boolean {
 }
 
 describe("Anthropic to OpenAI translation logic", () => {
+  test("should map dated Claude 3.5 Sonnet aliases to an available Copilot model", () => {
+    state.models = {
+      object: "list",
+      data: [
+        {
+          id: "claude-3.5-sonnet",
+          object: "model",
+          name: "Claude 3.5 Sonnet",
+          vendor: "anthropic",
+          version: "1",
+          preview: false,
+          model_picker_enabled: true,
+          capabilities: {
+            family: "claude",
+            limits: {},
+            object: "capabilities",
+            supports: {},
+            tokenizer: "mock",
+            type: "chat",
+          },
+        },
+      ],
+    }
+
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 0,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.model).toBe("claude-3.5-sonnet")
+  })
+
+  test("should map Claude Sonnet minor-version aliases to a supported major model", () => {
+    state.models = {
+      object: "list",
+      data: [
+        {
+          id: "claude-sonnet-4",
+          object: "model",
+          name: "Claude Sonnet 4",
+          vendor: "anthropic",
+          version: "1",
+          preview: false,
+          model_picker_enabled: true,
+          capabilities: {
+            family: "claude",
+            limits: {},
+            object: "capabilities",
+            supports: {},
+            tokenizer: "mock",
+            type: "chat",
+          },
+        },
+      ],
+    }
+
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-sonnet-4-5",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 0,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.model).toBe("claude-sonnet-4")
+  })
+
   test("should translate minimal Anthropic payload to valid OpenAI payload", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "gpt-4o",

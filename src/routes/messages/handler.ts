@@ -1,10 +1,16 @@
 import type { Context } from "hono"
 
 import consola from "consola"
+import { events } from "fetch-event-stream"
 import { streamSSE } from "hono/streaming"
 
 import { awaitApproval } from "~/lib/approval"
 import { checkRateLimit } from "~/lib/rate-limit"
+import {
+  setRequestModel,
+  setResolvedModel,
+  setResponseModel,
+} from "~/lib/request-logger"
 import { state } from "~/lib/state"
 import {
   createChatCompletions,
@@ -26,9 +32,11 @@ export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
+  setRequestModel(c, anthropicPayload.model)
   consola.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
 
   const openAIPayload = translateToOpenAI(anthropicPayload)
+  setResolvedModel(c, openAIPayload.model)
   consola.debug(
     "Translated OpenAI request payload:",
     JSON.stringify(openAIPayload),
@@ -41,6 +49,7 @@ export async function handleCompletion(c: Context) {
   const response = await createChatCompletions(openAIPayload)
 
   if (isNonStreaming(response)) {
+    setResponseModel(c, response.model)
     consola.debug(
       "Non-streaming response from Copilot:",
       JSON.stringify(response).slice(-400),
@@ -59,10 +68,17 @@ export async function handleCompletion(c: Context) {
       messageStartSent: false,
       contentBlockIndex: 0,
       contentBlockOpen: false,
+      currentContentBlockType: undefined,
       toolCalls: {},
     }
 
-    for await (const rawEvent of response) {
+    const eventStream = events(
+      new Response(response, {
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    )
+
+    for await (const rawEvent of eventStream) {
       consola.debug("Copilot raw stream event:", JSON.stringify(rawEvent))
       if (rawEvent.data === "[DONE]") {
         break

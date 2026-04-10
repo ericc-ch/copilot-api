@@ -1,5 +1,4 @@
 import consola from "consola"
-import { events } from "fetch-event-stream"
 
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
@@ -10,7 +9,9 @@ export const createChatCompletions = async (
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
-  const enableVision = payload.messages.some(
+  const normalizedPayload = normalizeCompletionTokenParam(payload)
+
+  const enableVision = normalizedPayload.messages.some(
     (x) =>
       typeof x.content !== "string"
       && x.content?.some((x) => x.type === "image_url"),
@@ -18,7 +19,7 @@ export const createChatCompletions = async (
 
   // Agent/user check for X-Initiator header
   // Determine if any message is from an agent ("assistant" or "tool")
-  const isAgentCall = payload.messages.some((msg) =>
+  const isAgentCall = normalizedPayload.messages.some((msg) =>
     ["assistant", "tool"].includes(msg.role),
   )
 
@@ -39,11 +40,42 @@ export const createChatCompletions = async (
     throw new HTTPError("Failed to create chat completions", response)
   }
 
-  if (payload.stream) {
-    return events(response)
+  if (normalizedPayload.stream) {
+    return response.body as ReadableStream
   }
 
   return (await response.json()) as ChatCompletionResponse
+}
+
+export function normalizeCompletionTokenParam(
+  payload: ChatCompletionsPayload,
+): ChatCompletionsPayload {
+  const normalizedPayload = { ...payload }
+
+  if (usesMaxCompletionTokens(normalizedPayload.model)) {
+    if (
+      normalizedPayload.max_completion_tokens === undefined
+      && normalizedPayload.max_tokens !== undefined
+    ) {
+      normalizedPayload.max_completion_tokens = normalizedPayload.max_tokens
+    }
+    delete normalizedPayload.max_tokens
+    return normalizedPayload
+  }
+
+  if (
+    normalizedPayload.max_completion_tokens !== undefined
+    && normalizedPayload.max_tokens === undefined
+  ) {
+    normalizedPayload.max_tokens = normalizedPayload.max_completion_tokens
+  }
+  delete normalizedPayload.max_completion_tokens
+
+  return normalizedPayload
+}
+
+export function usesMaxCompletionTokens(model: string): boolean {
+  return /^gpt-5(?:[.-]|$)/.test(model)
 }
 
 // Streaming types
@@ -72,6 +104,8 @@ export interface ChatCompletionChunk {
 interface Delta {
   content?: string | null
   role?: "user" | "assistant" | "system" | "tool"
+  reasoning_text?: string | null
+  reasoning_opaque?: string | null
   tool_calls?: Array<{
     index: number
     id?: string
@@ -130,6 +164,7 @@ export interface ChatCompletionsPayload {
   temperature?: number | null
   top_p?: number | null
   max_tokens?: number | null
+  max_completion_tokens?: number | null
   stop?: string | Array<string> | null
   n?: number | null
   stream?: boolean | null

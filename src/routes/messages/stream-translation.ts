@@ -6,14 +6,68 @@ import {
 } from "./anthropic-types"
 import { mapOpenAIStopReasonToAnthropic } from "./utils"
 
-function isToolBlockOpen(state: AnthropicStreamState): boolean {
+function closeCurrentBlock(
+  state: AnthropicStreamState,
+  events: Array<AnthropicStreamEventData>,
+) {
   if (!state.contentBlockOpen) {
-    return false
+    return
   }
-  // Check if the current block index corresponds to any known tool call
-  return Object.values(state.toolCalls).some(
-    (tc) => tc.anthropicBlockIndex === state.contentBlockIndex,
-  )
+
+  events.push({
+    type: "content_block_stop",
+    index: state.contentBlockIndex,
+  })
+
+  state.contentBlockIndex++
+  state.contentBlockOpen = false
+  state.currentContentBlockType = undefined
+}
+
+function ensureTextBlock(
+  state: AnthropicStreamState,
+  events: Array<AnthropicStreamEventData>,
+) {
+  if (state.currentContentBlockType === "text") {
+    return
+  }
+
+  closeCurrentBlock(state, events)
+
+  events.push({
+    type: "content_block_start",
+    index: state.contentBlockIndex,
+    content_block: {
+      type: "text",
+      text: "",
+    },
+  })
+
+  state.contentBlockOpen = true
+  state.currentContentBlockType = "text"
+}
+
+function ensureThinkingBlock(
+  state: AnthropicStreamState,
+  events: Array<AnthropicStreamEventData>,
+) {
+  if (state.currentContentBlockType === "thinking") {
+    return
+  }
+
+  closeCurrentBlock(state, events)
+
+  events.push({
+    type: "content_block_start",
+    index: state.contentBlockIndex,
+    content_block: {
+      type: "thinking",
+      thinking: "",
+    },
+  })
+
+  state.contentBlockOpen = true
+  state.currentContentBlockType = "thinking"
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity
@@ -57,28 +111,34 @@ export function translateChunkToAnthropicEvents(
     state.messageStartSent = true
   }
 
-  if (delta.content) {
-    if (isToolBlockOpen(state)) {
-      // A tool block was open, so close it before starting a text block.
-      events.push({
-        type: "content_block_stop",
-        index: state.contentBlockIndex,
-      })
-      state.contentBlockIndex++
-      state.contentBlockOpen = false
-    }
+  if (delta.reasoning_text) {
+    ensureThinkingBlock(state, events)
 
-    if (!state.contentBlockOpen) {
-      events.push({
-        type: "content_block_start",
-        index: state.contentBlockIndex,
-        content_block: {
-          type: "text",
-          text: "",
-        },
-      })
-      state.contentBlockOpen = true
-    }
+    events.push({
+      type: "content_block_delta",
+      index: state.contentBlockIndex,
+      delta: {
+        type: "thinking_delta",
+        thinking: delta.reasoning_text,
+      },
+    })
+  }
+
+  if (delta.reasoning_opaque) {
+    ensureThinkingBlock(state, events)
+
+    events.push({
+      type: "content_block_delta",
+      index: state.contentBlockIndex,
+      delta: {
+        type: "signature_delta",
+        signature: delta.reasoning_opaque,
+      },
+    })
+  }
+
+  if (delta.content) {
+    ensureTextBlock(state, events)
 
     events.push({
       type: "content_block_delta",
@@ -94,15 +154,7 @@ export function translateChunkToAnthropicEvents(
     for (const toolCall of delta.tool_calls) {
       if (toolCall.id && toolCall.function?.name) {
         // New tool call starting.
-        if (state.contentBlockOpen) {
-          // Close any previously open block.
-          events.push({
-            type: "content_block_stop",
-            index: state.contentBlockIndex,
-          })
-          state.contentBlockIndex++
-          state.contentBlockOpen = false
-        }
+        closeCurrentBlock(state, events)
 
         const anthropicBlockIndex = state.contentBlockIndex
         state.toolCalls[toolCall.index] = {
@@ -122,6 +174,7 @@ export function translateChunkToAnthropicEvents(
           },
         })
         state.contentBlockOpen = true
+        state.currentContentBlockType = "tool_use"
       }
 
       if (toolCall.function?.arguments) {
@@ -149,6 +202,7 @@ export function translateChunkToAnthropicEvents(
         index: state.contentBlockIndex,
       })
       state.contentBlockOpen = false
+      state.currentContentBlockType = undefined
     }
 
     events.push(
