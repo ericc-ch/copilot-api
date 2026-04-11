@@ -133,6 +133,7 @@ export interface ChatCompletionsPayload {
   stop?: string | Array<string> | null
   n?: number | null
   stream?: boolean | null
+  stream_options?: { include_usage: boolean } | null
 
   frequency_penalty?: number | null
   presence_penalty?: number | null

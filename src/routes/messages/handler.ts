@@ -6,6 +6,8 @@ import { streamSSE } from "hono/streaming"
 import { awaitApproval } from "~/lib/approval"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
+import { recordTokenUsage } from "~/lib/token-store"
+import { getTokenCount } from "~/lib/tokenizer"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
@@ -28,7 +30,7 @@ export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   consola.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
 
-  const openAIPayload = translateToOpenAI(anthropicPayload)
+  let openAIPayload = translateToOpenAI(anthropicPayload)
   consola.debug(
     "Translated OpenAI request payload:",
     JSON.stringify(openAIPayload),
@@ -38,6 +40,27 @@ export async function handleCompletion(c: Context) {
     await awaitApproval()
   }
 
+  // Calculate estimated token count as fallback for streaming with no usage data
+  const selectedModel = state.models?.data.find(
+    (model) => model.id === openAIPayload.model,
+  )
+  let estimatedTokenCount: { input: number; output: number } | null = null
+  try {
+    if (selectedModel) {
+      estimatedTokenCount = await getTokenCount(openAIPayload, selectedModel)
+    }
+  } catch {
+    // non-critical, ignore
+  }
+
+  // Request usage data in streaming responses
+  if (openAIPayload.stream) {
+    openAIPayload = {
+      ...openAIPayload,
+      stream_options: { include_usage: true },
+    }
+  }
+
   const response = await createChatCompletions(openAIPayload)
 
   if (isNonStreaming(response)) {
@@ -45,6 +68,13 @@ export async function handleCompletion(c: Context) {
       "Non-streaming response from Copilot:",
       JSON.stringify(response).slice(-400),
     )
+
+    const inputTokens =
+      response.usage?.prompt_tokens ?? estimatedTokenCount?.input ?? 0
+    const outputTokens =
+      response.usage?.completion_tokens ?? estimatedTokenCount?.output ?? 0
+    recordTokenUsage(openAIPayload.model, inputTokens, outputTokens)
+
     const anthropicResponse = translateToAnthropic(response)
     consola.debug(
       "Translated Anthropic response:",
@@ -62,6 +92,8 @@ export async function handleCompletion(c: Context) {
       toolCalls: {},
     }
 
+    let lastUsage: ChatCompletionChunk["usage"] | undefined
+
     for await (const rawEvent of response) {
       consola.debug("Copilot raw stream event:", JSON.stringify(rawEvent))
       if (rawEvent.data === "[DONE]") {
@@ -73,6 +105,8 @@ export async function handleCompletion(c: Context) {
       }
 
       const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
+      if (chunk.usage) lastUsage = chunk.usage
+
       const events = translateChunkToAnthropicEvents(chunk, streamState)
 
       for (const event of events) {
@@ -83,6 +117,12 @@ export async function handleCompletion(c: Context) {
         })
       }
     }
+
+    recordTokenUsage(
+      openAIPayload.model,
+      lastUsage?.prompt_tokens ?? estimatedTokenCount?.input ?? 0,
+      lastUsage?.completion_tokens ?? estimatedTokenCount?.output ?? 0,
+    )
   })
 }
 
