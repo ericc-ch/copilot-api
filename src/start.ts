@@ -22,6 +22,7 @@ interface RunServerOptions {
   rateLimit?: number
   rateLimitWait: boolean
   githubToken?: string
+  githubUrl?: string
   claudeCode: boolean
   showToken: boolean
   proxyEnv: boolean
@@ -40,6 +41,12 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.accountType = options.accountType
   if (options.accountType !== "individual") {
     consola.info(`Using ${options.accountType} plan GitHub account`)
+  }
+
+  const githubUrl = options.githubUrl ?? process.env.GITHUB_URL
+  if (githubUrl) {
+    state.githubUrl = githubUrl
+    consola.info(`Using GitHub Enterprise URL: ${githubUrl}`)
   }
 
   state.manualApprove = options.manual
@@ -184,6 +191,11 @@ export const start = defineCommand({
       default: false,
       description: "Initialize proxy from environment variables",
     },
+    "github-url": {
+      type: "string",
+      description:
+        "GitHub Enterprise URL (e.g., https://github.example.com). Can also be set via GITHUB_URL env var",
+    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
@@ -199,6 +211,7 @@ export const start = defineCommand({
       rateLimit,
       rateLimitWait: args.wait,
       githubToken: args["github-token"],
+      githubUrl: args["github-url"],
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
       proxyEnv: args["proxy-env"],

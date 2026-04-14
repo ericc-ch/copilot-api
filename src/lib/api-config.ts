@@ -36,7 +36,11 @@ export const copilotHeaders = (state: State, vision: boolean = false) => {
   return headers
 }
 
-export const GITHUB_API_BASE_URL = "https://api.github.com"
+export const githubApiBaseUrl = (state: State) =>
+  state.githubUrl ?
+    `${state.githubUrl.replace(/\/$/, "")}/api/v3`
+  : "https://api.github.com"
+
 export const githubHeaders = (state: State) => ({
   ...standardHeaders(),
   authorization: `token ${state.githubToken}`,
@@ -47,6 +51,8 @@ export const githubHeaders = (state: State) => ({
   "x-vscode-user-agent-library-version": "electron-fetch",
 })
 
-export const GITHUB_BASE_URL = "https://github.com"
+export const githubBaseUrl = (state: State) =>
+  state.githubUrl ? state.githubUrl.replace(/\/$/, "") : "https://github.com"
+
 export const GITHUB_CLIENT_ID = "Iv1.b507a08c87ecfe98"
 export const GITHUB_APP_SCOPES = ["read:user"].join(" ")

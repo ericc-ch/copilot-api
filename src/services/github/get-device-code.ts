@@ -1,13 +1,14 @@
 import {
   GITHUB_APP_SCOPES,
-  GITHUB_BASE_URL,
   GITHUB_CLIENT_ID,
+  githubBaseUrl,
   standardHeaders,
 } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
+import { state } from "~/lib/state"
 
 export async function getDeviceCode(): Promise<DeviceCodeResponse> {
-  const response = await fetch(`${GITHUB_BASE_URL}/login/device/code`, {
+  const response = await fetch(`${githubBaseUrl(state)}/login/device/code`, {
     method: "POST",
     headers: standardHeaders(),
     body: JSON.stringify({

@@ -12,6 +12,9 @@ export interface State {
   rateLimitWait: boolean
   showToken: boolean
 
+  // GitHub Enterprise URL (e.g., https://github.example.com)
+  githubUrl?: string
+
   // Rate limiting configuration
   rateLimitSeconds?: number
   lastRequestTimestamp?: number
