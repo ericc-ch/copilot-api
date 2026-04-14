@@ -19,7 +19,7 @@ export interface AnthropicMessagesPayload {
     name?: string
   }
   thinking?: {
-    type: "enabled"
+    type: "enabled" | "disabled"
     budget_tokens?: number
   }
   service_tier?: "auto" | "standard_only"
@@ -56,6 +56,7 @@ export interface AnthropicToolUseBlock {
 export interface AnthropicThinkingBlock {
   type: "thinking"
   thinking: string
+  signature?: string
 }
 
 export type AnthropicUserContentBlock =
@@ -92,6 +93,7 @@ export interface AnthropicResponse {
   role: "assistant"
   content: Array<AnthropicAssistantContentBlock>
   model: string
+  reasoning_opaque?: string
   stop_reason:
     | "end_turn"
     | "max_tokens"
@@ -195,7 +197,8 @@ export type AnthropicStreamEventData =
 export interface AnthropicStreamState {
   messageStartSent: boolean
   contentBlockIndex: number
-  contentBlockOpen: boolean
+  currentBlockType?: "text" | "thinking" | "tool_use"
+  reasoningOpaque?: string
   toolCalls: {
     [openAIToolIndex: number]: {
       id: string

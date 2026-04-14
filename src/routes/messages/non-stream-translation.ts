@@ -1,3 +1,5 @@
+import type { ReasoningContext } from "~/routes/reasoning-context"
+
 import {
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
@@ -28,6 +30,7 @@ import { mapOpenAIStopReasonToAnthropic } from "./utils"
 
 export function translateToOpenAI(
   payload: AnthropicMessagesPayload,
+  context: ReasoningContext,
 ): ChatCompletionsPayload {
   return {
     model: translateModelName(payload.model),
@@ -43,6 +46,8 @@ export function translateToOpenAI(
     user: payload.metadata?.user_id,
     tools: translateAnthropicToolsToOpenAI(payload.tools),
     tool_choice: translateAnthropicToolChoiceToOpenAI(payload.tool_choice),
+    reasoning_effort: context.reasoningEffort,
+    thinking_budget: context.thinkingBudget,
   }
 }
 
@@ -281,35 +286,23 @@ function translateAnthropicToolChoiceToOpenAI(
 export function translateToAnthropic(
   response: ChatCompletionResponse,
 ): AnthropicResponse {
-  // Merge content from all choices
-  const allTextBlocks: Array<AnthropicTextBlock> = []
-  const allToolUseBlocks: Array<AnthropicToolUseBlock> = []
-  let stopReason: "stop" | "length" | "tool_calls" | "content_filter" | null =
-    null // default
-  stopReason = response.choices[0]?.finish_reason ?? stopReason
-
-  // Process all choices to extract text and tool use blocks
-  for (const choice of response.choices) {
-    const textBlocks = getAnthropicTextBlocks(choice.message.content)
-    const toolUseBlocks = getAnthropicToolUseBlocks(choice.message.tool_calls)
-
-    allTextBlocks.push(...textBlocks)
-    allToolUseBlocks.push(...toolUseBlocks)
-
-    // Use the finish_reason from the first choice, or prioritize tool_calls
-    if (choice.finish_reason === "tool_calls" || stopReason === "stop") {
-      stopReason = choice.finish_reason
-    }
-  }
-
-  // Note: GitHub Copilot doesn't generate thinking blocks, so we don't include them in responses
+  const content = response.choices.flatMap((choice) => [
+    ...getAnthropicThinkingBlocks(choice.message.reasoning_text),
+    ...getAnthropicTextBlocks(choice.message.content),
+    ...getAnthropicToolUseBlocks(choice.message.tool_calls),
+  ])
+  const reasoningOpaque = response.choices.find(
+    (choice) => choice.message.reasoning_opaque,
+  )?.message.reasoning_opaque
+  const stopReason = getAnthropicStopReason(response.choices)
 
   return {
     id: response.id,
     type: "message",
     role: "assistant",
     model: response.model,
-    content: [...allTextBlocks, ...allToolUseBlocks],
+    reasoning_opaque: reasoningOpaque ?? undefined,
+    content,
     stop_reason: mapOpenAIStopReasonToAnthropic(stopReason),
     stop_sequence: null,
     usage: {
@@ -324,6 +317,31 @@ export function translateToAnthropic(
       }),
     },
   }
+}
+
+function getAnthropicStopReason(
+  choices: ChatCompletionResponse["choices"],
+): "stop" | "length" | "tool_calls" | "content_filter" | null {
+  let stopReason: "stop" | "length" | "tool_calls" | "content_filter" | null =
+    choices[0]?.finish_reason ?? null
+
+  for (const choice of choices) {
+    if (choice.finish_reason === "tool_calls" || stopReason === "stop") {
+      stopReason = choice.finish_reason
+    }
+  }
+
+  return stopReason
+}
+
+function getAnthropicThinkingBlocks(
+  reasoningText: string | null | undefined,
+): Array<AnthropicThinkingBlock> {
+  if (!reasoningText) {
+    return []
+  }
+
+  return [{ type: "thinking", thinking: reasoningText }]
 }
 
 function getAnthropicTextBlocks(

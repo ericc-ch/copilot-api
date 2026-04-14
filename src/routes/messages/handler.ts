@@ -6,6 +6,7 @@ import { streamSSE } from "hono/streaming"
 import { awaitApproval } from "~/lib/approval"
 import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
+import { buildAnthropicReasoningContext } from "~/routes/reasoning-context"
 import {
   createChatCompletions,
   type ChatCompletionChunk,
@@ -28,7 +29,26 @@ export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   consola.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
 
-  const openAIPayload = translateToOpenAI(anthropicPayload)
+  const selectedModel = state.models?.data.find(
+    (model) => model.id === anthropicPayload.model,
+  )
+  const reasoningContext = buildAnthropicReasoningContext(
+    anthropicPayload,
+    selectedModel,
+  )
+
+  if (
+    anthropicPayload.thinking?.type === "enabled"
+    && reasoningContext.reasoningEffort === undefined
+    && reasoningContext.thinkingBudget === undefined
+  ) {
+    consola.debug(
+      "Stripping unsupported Anthropic thinking config for model:",
+      anthropicPayload.model,
+    )
+  }
+
+  const openAIPayload = translateToOpenAI(anthropicPayload, reasoningContext)
   consola.debug(
     "Translated OpenAI request payload:",
     JSON.stringify(openAIPayload),
@@ -58,7 +78,6 @@ export async function handleCompletion(c: Context) {
     const streamState: AnthropicStreamState = {
       messageStartSent: false,
       contentBlockIndex: 0,
-      contentBlockOpen: false,
       toolCalls: {},
     }
 

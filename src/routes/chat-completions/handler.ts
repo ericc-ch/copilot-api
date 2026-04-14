@@ -8,6 +8,7 @@ import { checkRateLimit } from "~/lib/rate-limit"
 import { state } from "~/lib/state"
 import { getTokenCount } from "~/lib/tokenizer"
 import { isNullish } from "~/lib/utils"
+import { buildOpenAIReasoningContext } from "~/routes/reasoning-context"
 import {
   createChatCompletions,
   type ChatCompletionResponse,
@@ -45,6 +46,21 @@ export async function handleCompletion(c: Context) {
       max_tokens: selectedModel?.capabilities.limits.max_output_tokens,
     }
     consola.debug("Set max_tokens to:", JSON.stringify(payload.max_tokens))
+  }
+
+  const reasoningContext = buildOpenAIReasoningContext(payload, selectedModel)
+
+  if (payload.thinking_budget && !reasoningContext.thinkingBudget) {
+    consola.debug(
+      "Dropping unsupported OpenAI thinking_budget for model:",
+      payload.model,
+    )
+  }
+
+  payload = {
+    ...payload,
+    reasoning_effort: reasoningContext.reasoningEffort,
+    thinking_budget: reasoningContext.thinkingBudget,
   }
 
   const response = await createChatCompletions(payload)

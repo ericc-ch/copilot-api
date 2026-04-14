@@ -6,14 +6,32 @@ import {
 } from "./anthropic-types"
 import { mapOpenAIStopReasonToAnthropic } from "./utils"
 
-function isToolBlockOpen(state: AnthropicStreamState): boolean {
-  if (!state.contentBlockOpen) {
-    return false
+function closeOpenBlock(
+  events: Array<AnthropicStreamEventData>,
+  state: AnthropicStreamState,
+): void {
+  if (!state.currentBlockType) {
+    return
   }
-  // Check if the current block index corresponds to any known tool call
-  return Object.values(state.toolCalls).some(
-    (tc) => tc.anthropicBlockIndex === state.contentBlockIndex,
-  )
+
+  if (state.currentBlockType === "thinking" && state.reasoningOpaque) {
+    events.push({
+      type: "content_block_delta",
+      index: state.contentBlockIndex,
+      delta: {
+        type: "signature_delta",
+        signature: state.reasoningOpaque,
+      },
+    })
+    state.reasoningOpaque = undefined
+  }
+
+  events.push({
+    type: "content_block_stop",
+    index: state.contentBlockIndex,
+  })
+  state.contentBlockIndex++
+  state.currentBlockType = undefined
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity
@@ -57,18 +75,43 @@ export function translateChunkToAnthropicEvents(
     state.messageStartSent = true
   }
 
-  if (delta.content) {
-    if (isToolBlockOpen(state)) {
-      // A tool block was open, so close it before starting a text block.
-      events.push({
-        type: "content_block_stop",
-        index: state.contentBlockIndex,
-      })
-      state.contentBlockIndex++
-      state.contentBlockOpen = false
+  if (delta.reasoning_opaque) {
+    state.reasoningOpaque = delta.reasoning_opaque
+  }
+
+  if (delta.reasoning_text) {
+    if (state.currentBlockType && state.currentBlockType !== "thinking") {
+      closeOpenBlock(events, state)
     }
 
-    if (!state.contentBlockOpen) {
+    if (!state.currentBlockType) {
+      events.push({
+        type: "content_block_start",
+        index: state.contentBlockIndex,
+        content_block: {
+          type: "thinking",
+          thinking: "",
+        },
+      })
+      state.currentBlockType = "thinking"
+    }
+
+    events.push({
+      type: "content_block_delta",
+      index: state.contentBlockIndex,
+      delta: {
+        type: "thinking_delta",
+        thinking: delta.reasoning_text,
+      },
+    })
+  }
+
+  if (delta.content) {
+    if (state.currentBlockType && state.currentBlockType !== "text") {
+      closeOpenBlock(events, state)
+    }
+
+    if (!state.currentBlockType) {
       events.push({
         type: "content_block_start",
         index: state.contentBlockIndex,
@@ -77,7 +120,7 @@ export function translateChunkToAnthropicEvents(
           text: "",
         },
       })
-      state.contentBlockOpen = true
+      state.currentBlockType = "text"
     }
 
     events.push({
@@ -94,14 +137,8 @@ export function translateChunkToAnthropicEvents(
     for (const toolCall of delta.tool_calls) {
       if (toolCall.id && toolCall.function?.name) {
         // New tool call starting.
-        if (state.contentBlockOpen) {
-          // Close any previously open block.
-          events.push({
-            type: "content_block_stop",
-            index: state.contentBlockIndex,
-          })
-          state.contentBlockIndex++
-          state.contentBlockOpen = false
+        if (state.currentBlockType) {
+          closeOpenBlock(events, state)
         }
 
         const anthropicBlockIndex = state.contentBlockIndex
@@ -121,7 +158,7 @@ export function translateChunkToAnthropicEvents(
             input: {},
           },
         })
-        state.contentBlockOpen = true
+        state.currentBlockType = "tool_use"
       }
 
       if (toolCall.function?.arguments) {
@@ -143,13 +180,7 @@ export function translateChunkToAnthropicEvents(
   }
 
   if (choice.finish_reason) {
-    if (state.contentBlockOpen) {
-      events.push({
-        type: "content_block_stop",
-        index: state.contentBlockIndex,
-      })
-      state.contentBlockOpen = false
-    }
+    closeOpenBlock(events, state)
 
     events.push(
       {

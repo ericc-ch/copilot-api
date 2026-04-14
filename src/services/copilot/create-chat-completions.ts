@@ -71,6 +71,8 @@ export interface ChatCompletionChunk {
 
 interface Delta {
   content?: string | null
+  reasoning_opaque?: string | null
+  reasoning_text?: string | null
   role?: "user" | "assistant" | "system" | "tool"
   tool_calls?: Array<{
     index: number
@@ -112,6 +114,8 @@ export interface ChatCompletionResponse {
 interface ResponseMessage {
   role: "assistant"
   content: string | null
+  reasoning_opaque?: string | null
+  reasoning_text?: string | null
   tool_calls?: Array<ToolCall>
 }
 
@@ -139,7 +143,10 @@ export interface ChatCompletionsPayload {
   logit_bias?: Record<string, number> | null
   logprobs?: boolean | null
   response_format?: { type: "json_object" } | null
+  reasoning_effort?: "low" | "medium" | "high" | (string & {}) | null
   seed?: number | null
+  stream_options?: { include_usage?: boolean } | null
+  thinking_budget?: number | null
   tools?: Array<Tool> | null
   tool_choice?:
     | "none"

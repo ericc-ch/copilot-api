@@ -1,5 +1,20 @@
 # Copilot API Proxy
 
+> **This is a fork of [ericc-ch/copilot-api](https://github.com/ericc-ch/copilot-api) with full reasoning / extended-thinking support added.**
+>
+> **What this fork adds:**
+>
+> - **Capability-aware reasoning routing** — reads each model's `capabilities.supports` at startup and routes `reasoning_effort` / `thinking_budget` only to models that actually support them; unsupported models silently strip the fields.
+> - **Anthropic ↔ OpenAI thinking translation** — `thinking: { type: "enabled", budget_tokens: N }` on the `/v1/messages` surface is automatically translated into `reasoning_effort: "high"` + `thinking_budget` for the upstream call, and vice versa.
+> - **Streaming thinking traces** — Claude thinking streams emit proper `content_block_start` / `thinking_delta` / `signature_delta` / `content_block_stop` events so Claude Code and similar clients see native thinking UIs.
+> - **Forward-compatible `reasoning_effort`** — type accepts any string (not just `"low" | "medium" | "high"`), so new model-specific values like `"xhigh"` or `"minimal"` are transparently passed through without code changes.
+>
+> Everything else — auth, rate limiting, usage dashboard, CLI flags — is identical to the upstream project.
+
+---
+
+**One Copilot subscription. Every frontier reasoning model. OpenAI and Anthropic shaped.** Point Claude Code, Cline, or your own scripts at a single localhost URL and unlock Claude Sonnet 4.6, GPT-5, Gemini, and friends — with real reasoning traces and thinking budgets routed to whichever knob the upstream model actually supports.
+
 > [!WARNING]
 > This is a reverse-engineered proxy of GitHub Copilot API. It is not supported by GitHub, and may break unexpectedly. Use at your own risk.
 
@@ -32,6 +47,7 @@ A reverse-engineered proxy for the GitHub Copilot API that exposes it as an Open
 ## Features
 
 - **OpenAI & Anthropic Compatibility**: Exposes GitHub Copilot as an OpenAI-compatible (`/v1/chat/completions`, `/v1/models`, `/v1/embeddings`) and Anthropic-compatible (`/v1/messages`) API.
+- **Reasoning & Extended Thinking**: Capability-aware translation of `reasoning_effort` and Anthropic `thinking` blocks. Thinking traces, signatures, and `reasoning_opaque` tokens flow through both non-streaming and streaming responses without you having to know which upstream flag each model wants.
 - **Claude Code Integration**: Easily configure and launch [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) to use Copilot as its backend with a simple command-line flag (`--claude-code`).
 - **Usage Dashboard**: A web-based dashboard to monitor your Copilot API usage, view quotas, and see detailed statistics.
 - **Rate Limit Control**: Manage API usage with rate-limiting options (`--rate-limit`) and a waiting mechanism (`--wait`) to prevent errors from rapid requests.
@@ -277,6 +293,56 @@ The dashboard provides a user-friendly interface to view your Copilot usage data
 - **Detailed Information**: See the full JSON response from the API for a detailed breakdown of all available usage statistics.
 - **URL-based Configuration**: You can also specify the API endpoint directly in the URL using a query parameter. This is useful for bookmarks or sharing links. For example:
   `https://ericc-ch.github.io/copilot-api?endpoint=http://your-api-server/usage`
+
+## Reasoning & Extended Thinking
+
+Each Copilot model advertises its own reasoning knobs under `capabilities.supports`. The proxy reads them at startup and translates requests accordingly, so the same client call works across Claude, GPT, Gemini, and friends.
+
+### OpenAI-shaped requests (`/v1/chat/completions`)
+
+- `reasoning_effort` (`low` | `medium` | `high`, plus `minimal` for GPT-5 family) is passed through to any model whose `supports.reasoning_effort` is non-empty. Other models get it stripped.
+- `thinking_budget` is passed through only when the model advertises `supports.adaptive_thinking` (currently Claude Sonnet 4.5+/4.6, Opus 4.6). Unsupported models silently drop it.
+- Claude reasoning responses surface as `reasoning_text` and `reasoning_opaque` on the assistant message.
+
+```sh
+# GPT-5 mini with heavy reasoning
+curl http://localhost:4141/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5-mini",
+    "reasoning_effort": "high",
+    "messages": [{"role": "user", "content": "Think carefully: what is 17*23?"}]
+  }'
+
+# Claude Sonnet 4.6 with an explicit thinking budget
+curl http://localhost:4141/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "reasoning_effort": "high",
+    "thinking_budget": 2048,
+    "messages": [{"role": "user", "content": "Think carefully: what is 17*23?"}]
+  }'
+```
+
+### Anthropic-shaped requests (`/v1/messages`)
+
+- `thinking: {"type": "enabled", "budget_tokens": N}` is translated into `reasoning_effort: "high"` for any reasoning-capable model, plus `thinking_budget` for adaptive-thinking models.
+- `thinking: {"type": "disabled"}` suppresses both fields upstream.
+- If the selected model supports neither knob, the thinking config is silently stripped and logged at debug level — the request still succeeds.
+- Claude thinking streams emit `content_block_start` / `thinking_delta` / `signature_delta` / `content_block_stop` events before the text block, so Claude Code and similar clients see native thinking UIs.
+
+```sh
+# Extended thinking via the Anthropic surface
+curl http://localhost:4141/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4.6",
+    "max_tokens": 1024,
+    "thinking": {"type": "enabled", "budget_tokens": 2048},
+    "messages": [{"role": "user", "content": "Think carefully: what is 17*23?"}]
+  }'
+```
 
 ## Using with Claude Code
 
