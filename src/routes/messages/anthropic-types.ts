@@ -46,6 +46,31 @@ export interface AnthropicToolResultBlock {
   is_error?: boolean
 }
 
+export interface AnthropicServerToolUseBlock {
+  type: "server_tool_use"
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+
+export interface AnthropicServerToolResultBlock {
+  type: "server_tool_result"
+  tool_use_id: string
+  content: unknown
+}
+
+export interface AnthropicWebSearchToolResultBlock {
+  type: "web_search_tool_result"
+  tool_use_id: string
+  content: Array<{
+    type: "web_search_result"
+    url: string
+    title: string
+    page_content: string
+    encrypted_index?: string
+  }>
+}
+
 export interface AnthropicToolUseBlock {
   type: "tool_use"
   id: string
@@ -62,11 +87,14 @@ export type AnthropicUserContentBlock =
   | AnthropicTextBlock
   | AnthropicImageBlock
   | AnthropicToolResultBlock
+  | AnthropicServerToolResultBlock
+  | AnthropicWebSearchToolResultBlock
 
 export type AnthropicAssistantContentBlock =
   | AnthropicTextBlock
   | AnthropicToolUseBlock
   | AnthropicThinkingBlock
+  | AnthropicServerToolUseBlock
 
 export interface AnthropicUserMessage {
   role: "user"
@@ -80,11 +108,21 @@ export interface AnthropicAssistantMessage {
 
 export type AnthropicMessage = AnthropicUserMessage | AnthropicAssistantMessage
 
-export interface AnthropicTool {
+export interface AnthropicCustomTool {
+  type?: "custom"
   name: string
   description?: string
   input_schema: Record<string, unknown>
 }
+
+export interface AnthropicServerTool {
+  type: string // e.g. "web_search_20250305"
+  name: string
+  // Server tools may carry additional config (max_uses, etc.)
+  [key: string]: unknown
+}
+
+export type AnthropicTool = AnthropicCustomTool | AnthropicServerTool
 
 export interface AnthropicResponse {
   id: string

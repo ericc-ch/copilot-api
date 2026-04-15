@@ -11,9 +11,12 @@ import {
 import {
   type AnthropicAssistantContentBlock,
   type AnthropicAssistantMessage,
+  type AnthropicCustomTool,
   type AnthropicMessage,
   type AnthropicMessagesPayload,
   type AnthropicResponse,
+  type AnthropicServerToolResultBlock,
+  type AnthropicServerToolUseBlock,
   type AnthropicTextBlock,
   type AnthropicThinkingBlock,
   type AnthropicTool,
@@ -21,6 +24,7 @@ import {
   type AnthropicToolUseBlock,
   type AnthropicUserContentBlock,
   type AnthropicUserMessage,
+  type AnthropicWebSearchToolResultBlock,
 } from "./anthropic-types"
 import { mapOpenAIStopReasonToAnthropic } from "./utils"
 
@@ -94,8 +98,18 @@ function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
       (block): block is AnthropicToolResultBlock =>
         block.type === "tool_result",
     )
+
+    // Convert server_tool_result / web_search_tool_result to user text
+    const serverToolResultBlocks = message.content.filter(
+      (block): block is AnthropicServerToolResultBlock | AnthropicWebSearchToolResultBlock =>
+        block.type === "server_tool_result" || block.type === "web_search_tool_result",
+    )
+
     const otherBlocks = message.content.filter(
-      (block) => block.type !== "tool_result",
+      (block) =>
+        block.type !== "tool_result" &&
+        block.type !== "server_tool_result" &&
+        block.type !== "web_search_tool_result",
     )
 
     // Tool results must come first to maintain protocol: tool_use -> tool_result -> user
@@ -105,6 +119,17 @@ function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
         tool_call_id: block.tool_use_id,
         content: mapContent(block.content),
       })
+    }
+
+    // Convert server tool results (web search) into user messages with search context
+    for (const block of serverToolResultBlocks) {
+      const searchText = formatServerToolResult(block)
+      if (searchText) {
+        newMessages.push({
+          role: "user",
+          content: `[Web Search Results]\n${searchText}`,
+        })
+      }
     }
 
     if (otherBlocks.length > 0) {
@@ -123,6 +148,20 @@ function handleUserMessage(message: AnthropicUserMessage): Array<Message> {
   return newMessages
 }
 
+function formatServerToolResult(
+  block: AnthropicServerToolResultBlock | AnthropicWebSearchToolResultBlock,
+): string {
+  if (block.type === "web_search_tool_result" && Array.isArray(block.content)) {
+    return block.content
+      .map((result) => `- [${result.title}](${result.url}): ${result.page_content}`)
+      .join("\n")
+  }
+  if (typeof block.content === "string") {
+    return block.content
+  }
+  return JSON.stringify(block.content)
+}
+
 function handleAssistantMessage(
   message: AnthropicAssistantMessage,
 ): Array<Message> {
@@ -139,6 +178,11 @@ function handleAssistantMessage(
     (block): block is AnthropicToolUseBlock => block.type === "tool_use",
   )
 
+  // Handle server_tool_use blocks (e.g. web_search) — convert to text context
+  const serverToolUseBlocks = message.content.filter(
+    (block): block is AnthropicServerToolUseBlock => block.type === "server_tool_use",
+  )
+
   const textBlocks = message.content.filter(
     (block): block is AnthropicTextBlock => block.type === "text",
   )
@@ -147,11 +191,15 @@ function handleAssistantMessage(
     (block): block is AnthropicThinkingBlock => block.type === "thinking",
   )
 
-  // Combine text and thinking blocks, as OpenAI doesn't have separate thinking blocks
-  const allTextContent = [
+  // Combine text, thinking, and server tool use descriptions
+  const allTextParts = [
     ...textBlocks.map((b) => b.text),
     ...thinkingBlocks.map((b) => b.thinking),
-  ].join("\n\n")
+    ...serverToolUseBlocks.map(
+      (b) => `[Used web search: ${JSON.stringify(b.input)}]`,
+    ),
+  ]
+  const allTextContent = allTextParts.filter(Boolean).join("\n\n")
 
   return toolUseBlocks.length > 0 ?
       [
@@ -171,7 +219,7 @@ function handleAssistantMessage(
     : [
         {
           role: "assistant",
-          content: mapContent(message.content),
+          content: allTextContent || mapContent(message.content),
         },
       ]
 }
@@ -234,7 +282,18 @@ function translateAnthropicToolsToOpenAI(
   if (!anthropicTools) {
     return undefined
   }
-  return anthropicTools.map((tool) => ({
+
+  // Filter out server tools (web_search, etc.) — they don't have input_schema
+  // and are not supported by the OpenAI API. They are handled separately.
+  const customTools = anthropicTools.filter(
+    (tool): tool is AnthropicCustomTool => isCustomTool(tool),
+  )
+
+  if (customTools.length === 0) {
+    return undefined
+  }
+
+  return customTools.map((tool) => ({
     type: "function",
     function: {
       name: tool.name,
@@ -242,6 +301,26 @@ function translateAnthropicToolsToOpenAI(
       parameters: tool.input_schema,
     },
   }))
+}
+
+/**
+ * Check if the tools array contains any web search server tools.
+ */
+export function hasWebSearchTool(
+  anthropicTools: Array<AnthropicTool> | undefined,
+): boolean {
+  if (!anthropicTools) return false
+  return anthropicTools.some((tool) => !isCustomTool(tool))
+}
+
+function isCustomTool(tool: AnthropicTool): tool is AnthropicCustomTool {
+  // Server tools have types like "web_search_20250305"
+  // Custom tools either have no type, type === "custom", or have input_schema
+  if (!tool.type || tool.type === "custom") return true
+  // If type starts with known server tool prefixes, it's a server tool
+  if (typeof tool.type === "string" && tool.type.startsWith("web_search")) return false
+  // Fallback: if it has input_schema, treat as custom tool
+  return "input_schema" in tool
 }
 
 function translateAnthropicToolChoiceToOpenAI(
