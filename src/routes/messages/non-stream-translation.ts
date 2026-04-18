@@ -46,12 +46,34 @@ export function translateToOpenAI(
   }
 }
 
+/**
+ * Normalize Claude model names from versioned format to base format.
+ * Claude Code sends versioned names like "claude-opus-4-7-20250514",
+ * but GHC expects base names like "claude-opus-4.7".
+ *
+ * Pattern: claude-{name}-{major}-{minor}-{date} → claude-{name}-{major}.{minor}
+ * Examples:
+ *   claude-opus-4-7-20250514 → claude-opus-4.7
+ *   claude-opus-4.7-20250514 → claude-opus-4.7
+ *   claude-sonnet-4-5-20250514 → claude-sonnet-4.5
+ *   claude-sonnet-4-5 → claude-sonnet-4.5
+ *   claude-sonnet-4 → claude-sonnet-4
+ */
 function translateModelName(model: string): string {
-  // Subagent requests use a specific model number which Copilot doesn't support
-  if (model.startsWith("claude-sonnet-4-")) {
-    return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
-  } else if (model.startsWith("claude-opus-")) {
-    return model.replace(/^claude-opus-4-.*/, "claude-opus-4")
+  // Match: claude-{name}-{major}-{minor}-{date} (e.g. claude-opus-4-7-20250514)
+  const dashDate = model.match(/^(claude-[a-z]+-\d+)-(\d+)-\d{8}$/)
+  if (dashDate) {
+    return `${dashDate[1]}.${dashDate[2]}`
+  }
+  // Match: claude-{name}-{major}.{minor}-{date} (e.g. claude-opus-4.7-20250514)
+  const dotDate = model.match(/^(claude-[a-z]+-\d+\.\d+)-\d{8}$/)
+  if (dotDate) {
+    return dotDate[1]
+  }
+  // Match: claude-{name}-{major}-{minor} without date (e.g. claude-opus-4-7)
+  const dashMinor = model.match(/^(claude-[a-z]+-\d+)-(\d+)$/)
+  if (dashMinor) {
+    return `${dashMinor[1]}.${dashMinor[2]}`
   }
   return model
 }
