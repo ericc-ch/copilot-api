@@ -35,7 +35,7 @@ export function translateToOpenAI(
       payload.messages,
       payload.system,
     ),
-    max_tokens: payload.max_tokens,
+    max_completion_tokens: payload.max_tokens,
     stop: payload.stop_sequences,
     stream: payload.stream,
     temperature: payload.temperature,

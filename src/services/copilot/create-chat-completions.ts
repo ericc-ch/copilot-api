@@ -129,7 +129,7 @@ export interface ChatCompletionsPayload {
   model: string
   temperature?: number | null
   top_p?: number | null
-  max_tokens?: number | null
+  max_completion_tokens?: number | null
   stop?: string | Array<string> | null
   n?: number | null
   stream?: boolean | null
