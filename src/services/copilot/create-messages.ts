@@ -57,12 +57,33 @@ function hasImageContent(payload: Record<string, unknown>): boolean {
   })
 }
 
+/**
+ * X-Initiator billing attribution for the Anthropic-native path.
+ *   "user"  — fresh human-initiated turn (CHARGED)
+ *   "agent" — tool/assistant continuation (FREE)
+ *
+ * Correct heuristic (mirrors closed PR #85 savings mode, and now the
+ * create-chat-completions.ts sibling): inspect ONLY the last message.
+ *
+ * Anthropic edge case vs OpenAI shape: tool results in Anthropic come back
+ * as "user"-role messages whose content array contains a `tool_result`
+ * block. Without special-casing this, every Anthropic tool-continuation
+ * turn would be wrongly flagged user=charged. If the last message is a
+ * user-role message whose content array contains a tool_result block,
+ * treat as agent.
+ */
 function hasAgentMessages(payload: Record<string, unknown>): boolean {
   const messages = payload.messages as
     | Array<Record<string, unknown>>
     | undefined
-  if (!messages) return false
-  return messages.some((msg) =>
-    ["assistant", "tool"].includes(msg.role as string),
-  )
+  if (!messages || messages.length === 0) return false
+  const last = messages.at(-1)
+  if (!last) return false
+  if (last.role !== "user") return true
+  if (Array.isArray(last.content)) {
+    return last.content.some(
+      (block: Record<string, unknown>) => block.type === "tool_result",
+    )
+  }
+  return false
 }

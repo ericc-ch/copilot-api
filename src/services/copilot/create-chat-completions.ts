@@ -16,11 +16,19 @@ export const createChatCompletions = async (
       && x.content?.some((x) => x.type === "image_url"),
   )
 
-  // Agent/user check for X-Initiator header
-  // Determine if any message is from an agent ("assistant" or "tool")
-  const isAgentCall = payload.messages.some((msg) =>
-    ["assistant", "tool"].includes(msg.role),
-  )
+  // X-Initiator billing attribution:
+  //   "user"  — a fresh human-initiated turn (CHARGED at model multiplier)
+  //   "agent" — tool/agent continuation of an in-progress turn (FREE)
+  // Per GitHub docs (docs.github.com/en/copilot/concepts/billing/copilot-requests):
+  // "only the prompts you send count as premium requests; actions Copilot
+  // takes autonomously to complete your task, such as tool calls, do not."
+  // The prior heuristic ("any assistant or tool role anywhere") flagged
+  // every multi-turn call as agent — inverted from the intended signal and
+  // a historical foot-gun. Correct heuristic (mirrors closed PR #85):
+  // inspect ONLY the last message. If it's a user turn, it's a fresh human
+  // prompt → user. Otherwise it's a tool/assistant continuation → agent.
+  const lastMessage = payload.messages.at(-1)
+  const isAgentCall = lastMessage !== undefined && lastMessage.role !== "user"
 
   // Build headers and add X-Initiator
   const headers: Record<string, string> = {
