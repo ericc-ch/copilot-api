@@ -39,12 +39,21 @@ export async function handleCompletion(c: Context) {
 
   if (state.manualApprove) await awaitApproval()
 
-  if (isNullish(payload.max_tokens)) {
-    payload = {
-      ...payload,
-      max_tokens: selectedModel?.capabilities.limits.max_output_tokens,
+  if (
+    isNullish(payload.max_tokens)
+    && isNullish(payload.max_completion_tokens)
+  ) {
+    const limit = selectedModel?.capabilities.limits.max_output_tokens
+    if (requiresMaxCompletionTokens(payload.model)) {
+      payload = { ...payload, max_completion_tokens: limit }
+      consola.debug(
+        "Set max_completion_tokens (reasoning model) to:",
+        JSON.stringify(limit),
+      )
+    } else {
+      payload = { ...payload, max_tokens: limit }
+      consola.debug("Set max_tokens to:", JSON.stringify(limit))
     }
-    consola.debug("Set max_tokens to:", JSON.stringify(payload.max_tokens))
   }
 
   const response = await createChatCompletions(payload)
@@ -66,3 +75,14 @@ export async function handleCompletion(c: Context) {
 const isNonStreaming = (
   response: Awaited<ReturnType<typeof createChatCompletions>>,
 ): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
+
+// OpenAI's reasoning-model families (o1, o3, o4, gpt-5.x) reject
+// `max_tokens` at API validation and require `max_completion_tokens`
+// instead. The anchored regex matches the family prefix followed by a
+// delimiter (hyphen, dot, or end of string) so "gpt-5", "gpt-5.4",
+// "o1-mini" all match while "gpt-4o", "gpt-4.1", "chatgpt-5-*" do not.
+// Extend this when OpenAI introduces new reasoning-only families.
+const REASONING_MODEL_ID = /^(?:o[134]|gpt-5)(?:[-.]|$)/
+
+export const requiresMaxCompletionTokens = (modelId: string | undefined) =>
+  modelId !== undefined && REASONING_MODEL_ID.test(modelId)
