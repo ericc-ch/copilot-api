@@ -1,19 +1,25 @@
 {
-  "name": "copilot-api",
-  "version": "0.7.0",
-  "description": "Turn GitHub Copilot into OpenAI/Anthropic API compatible server. Usable with Claude Code!",
+  "name": "@yang-builds/copilot-api",
+  "version": "0.7.0-patch.1",
+  "description": "Turn GitHub Copilot into OpenAI/Anthropic API compatible server. Fork of ericc-ch/copilot-api with fix for Claude Code new model name incompatibility (claude-sonnet-4-6, claude-opus-4-7, claude-haiku-4-5).",
   "keywords": [
     "proxy",
     "github-copilot",
     "openai-compatible"
   ],
-  "homepage": "https://github.com/ericc-ch/copilot-api",
-  "bugs": "https://github.com/ericc-ch/copilot-api/issues",
+  "homepage": "https://github.com/yang-builds/copilot-api",
+  "bugs": "https://github.com/yang-builds/copilot-api/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ericc-ch/copilot-api.git"
+    "url": "git+https://github.com/yang-builds/copilot-api.git"
   },
   "author": "Erick Christian <erickchristian48@gmail.com>",
+  "contributors": [
+    "yang-builds <https://github.com/yang-builds>"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "copilot-api": "./dist/main.js"

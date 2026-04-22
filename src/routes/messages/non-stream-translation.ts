@@ -47,12 +47,11 @@ export function translateToOpenAI(
 }
 
 function translateModelName(model: string): string {
-  // Subagent requests use a specific model number which Copilot doesn't support
-  if (model.startsWith("claude-sonnet-4-")) {
-    return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
-  } else if (model.startsWith("claude-opus-")) {
-    return model.replace(/^claude-opus-4-.*/, "claude-opus-4")
-  }
+  // Claude Code uses hyphenated model names (e.g. claude-sonnet-4-6) for display mapping,
+  // but GitHub Copilot backend requires dot notation (e.g. claude-sonnet-4.6).
+  // This regex converts hyphenated minor versions to dot notation for all Claude model families.
+  const m = model.match(/^(claude-(?:sonnet|opus|haiku))-(\d+)-(\d+)$/)
+  if (m) return `${m[1]}-${m[2]}.${m[3]}`
   return model
 }
 
