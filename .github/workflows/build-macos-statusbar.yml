@@ -1,0 +1,63 @@
+name: Build macOS Status Bar
+
+on:
+  push:
+    branches: [main]
+    paths: ['macos-app-source/**']
+  pull_request:
+    branches: [main]
+    paths: ['macos-app-source/**']
+
+jobs:
+  build-macos-app:
+    name: Build macOS Status Bar App
+    runs-on: macos-14
+    if: contains(github.event.head_commit.message, '[macos]') || github.event_name == 'pull_request'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: '15.4'
+
+    - name: Cache Swift packages
+      uses: actions/cache@v4
+      with:
+        path: macos-app-source/.build
+        key: ${{ runner.os }}-spm-${{ hashFiles('macos-app-source/Package.resolved') }}
+        restore-keys: ${{ runner.os }}-spm-
+
+    - name: Build Swift package
+      run: |
+        cd macos-app-source
+        swift build -c release
+
+    - name: Build app bundle
+      run: |
+        cd macos-app-source
+        chmod +x scripts/build_app.sh
+        ./scripts/build_app.sh
+
+    - name: Copy app to macos-app directory
+      run: |
+        rm -rf macos-app/*
+        cp -R macos-app-source/dist/* macos-app/
+
+    - name: Commit updated app bundle
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add macos-app/
+        git diff --staged --quiet || git commit -m "Update macOS status bar app bundle [skip ci]"
+        git push
+
+    - name: Upload app artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: copilot-statusbar-macos-${{ github.sha }}
+        path: macos-app/
+        retention-days: 30

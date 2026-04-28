@@ -31,7 +31,9 @@
     "prepare": "simple-git-hooks",
     "release": "bumpp && bun publish --access public",
     "start": "NODE_ENV=production bun run ./src/main.ts",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "build:macos": "cd macos-app-source && ./scripts/build_app.sh",
+    "test:macos": "bun test tests/statusbar.test.ts"
   },
   "simple-git-hooks": {
     "pre-commit": "bunx lint-staged"
