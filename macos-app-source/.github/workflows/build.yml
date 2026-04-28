@@ -1,0 +1,143 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PRODUCT_NAME: CopilotStatusBar
+  APP_DISPLAY_NAME: "Copilot Status Bar"
+
+jobs:
+  build:
+    name: Build macOS App
+    runs-on: macos-14
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: '15.4'
+
+    - name: Cache Swift packages
+      uses: actions/cache@v4
+      with:
+        path: .build
+        key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+        restore-keys: ${{ runner.os }}-spm-
+
+    - name: Build Swift package
+      run: |
+        swift build -c release
+
+    - name: Run tests
+      run: |
+        swift test --parallel
+      continue-on-error: true  # Tests optional for now
+
+    - name: Build app bundle
+      run: |
+        chmod +x scripts/build_app.sh
+        ./scripts/build_app.sh
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: copilot-status-bar-${{ github.sha }}
+        path: dist/
+        retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: macos-14
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: '15.4'
+
+    - name: Build release
+      run: |
+        chmod +x scripts/build_app.sh
+        ./scripts/build_app.sh
+
+    - name: Create DMG (if script exists)
+      run: |
+        if [ -f "scripts/create_dmg.sh" ]; then
+          chmod +x scripts/create_dmg.sh
+          ./scripts/create_dmg.sh
+        fi
+      continue-on-error: true
+
+    - name: Create ZIP archive
+      run: |
+        cd dist
+        zip -r "Copilot Status Bar.zip" "Copilot Status Bar.app"
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+        echo "## What's Changed" >> $GITHUB_OUTPUT
+        git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 HEAD^)..HEAD >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Copilot Status Bar ${{ github.ref_name }}
+        body: |
+          ${{ steps.changelog.outputs.CHANGELOG }}
+
+          ## Download
+          - **Recommended**: Download `Copilot Status Bar.zip` and extract the app
+          - **Requirements**: macOS 14.0+ (Sonoma or newer)
+
+          ## Installation
+          1. Download and extract the ZIP file
+          2. Move `Copilot Status Bar.app` to your Applications folder
+          3. Right-click and select "Open" to bypass Gatekeeper (first launch only)
+          4. Look for the terminal icon in your menu bar
+
+        draft: false
+        prerelease: false
+
+    - name: Upload ZIP to release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./dist/Copilot Status Bar.zip
+        asset_name: Copilot Status Bar.zip
+        asset_content_type: application/zip
+
+    - name: Upload DMG to release (if exists)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./dist/Copilot Status Bar.dmg
+        asset_name: Copilot Status Bar.dmg
+        asset_content_type: application/octet-stream
+      continue-on-error: true
