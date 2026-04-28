@@ -47,7 +47,18 @@ export function translateToOpenAI(
 }
 
 function translateModelName(model: string): string {
-  // Subagent requests use a specific model number which Copilot doesn't support
+  // Claude Code sends dash-versioned model IDs with date suffixes
+  // (e.g. "claude-opus-4-7-20251030"), but Copilot exposes dot-versioned
+  // IDs (e.g. "claude-opus-4.7"). Convert dash → dot for known 4.x families
+  // so that vision-capable models route correctly instead of falling back.
+  const versioned = model.match(
+    /^claude-(opus|sonnet|haiku)-(\d+)-(\d+)(?:-\d{6,8})?$/,
+  )
+  if (versioned) {
+    return `claude-${versioned[1]}-${versioned[2]}.${versioned[3]}`
+  }
+
+  // Legacy fallback: subagent requests with unsupported numeric suffixes
   if (model.startsWith("claude-sonnet-4-")) {
     return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
   } else if (model.startsWith("claude-opus-")) {
