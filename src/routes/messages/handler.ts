@@ -28,6 +28,8 @@ export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   consola.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
 
+  consola.info(`<-- ${c.req.method} (${anthropicPayload.model}) ${c.req.path}`)
+
   const openAIPayload = translateToOpenAI(anthropicPayload)
   consola.debug(
     "Translated OpenAI request payload:",

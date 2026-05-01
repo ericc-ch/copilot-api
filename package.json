@@ -1,19 +1,19 @@
 {
-  "name": "copilot-api",
-  "version": "0.7.0",
-  "description": "Turn GitHub Copilot into OpenAI/Anthropic API compatible server. Usable with Claude Code!",
+  "name": "betahi-copilot-api",
+  "version": "0.7.4",
+  "description": "GitHub Copilot proxy with OpenAI/Anthropic compatibility, GPT-5 and Gemini support for Claude Code.",
   "keywords": [
     "proxy",
     "github-copilot",
     "openai-compatible"
   ],
-  "homepage": "https://github.com/ericc-ch/copilot-api",
-  "bugs": "https://github.com/ericc-ch/copilot-api/issues",
+  "homepage": "https://github.com/betaHi/copilot-api",
+  "bugs": "https://github.com/betaHi/copilot-api/issues",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ericc-ch/copilot-api.git"
+    "url": "git+https://github.com/betaHi/copilot-api.git"
   },
-  "author": "Erick Christian <erickchristian48@gmail.com>",
+  "author": "betaHi",
   "type": "module",
   "bin": {
     "copilot-api": "./dist/main.js"
@@ -25,12 +25,12 @@
     "build": "tsdown",
     "dev": "bun run --watch ./src/main.ts",
     "knip": "knip-bun",
-    "lint": "eslint --cache",
-    "lint:all": "eslint --cache .",
+    "lint": "eslint --cache --no-warn-ignored",
+    "lint:all": "eslint --cache --no-warn-ignored .",
     "prepack": "bun run build",
     "prepare": "simple-git-hooks",
     "release": "bumpp && bun publish --access public",
-    "start": "NODE_ENV=production bun run ./src/main.ts",
+    "start": "NODE_ENV=production bun run ./src/main.ts start",
     "typecheck": "tsc"
   },
   "simple-git-hooks": {
@@ -54,6 +54,7 @@
   },
   "devDependencies": {
     "@echristian/eslint-config": "^0.0.54",
+    "@eslint/markdown": "^8.0.1",
     "@types/bun": "^1.2.23",
     "@types/proxy-from-env": "^1.0.4",
     "bumpp": "^10.2.3",

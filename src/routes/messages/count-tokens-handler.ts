@@ -2,7 +2,7 @@ import type { Context } from "hono"
 
 import consola from "consola"
 
-import { state } from "~/lib/state"
+import { resolveModel } from "~/lib/models"
 import { getTokenCount } from "~/lib/tokenizer"
 
 import { type AnthropicMessagesPayload } from "./anthropic-types"
@@ -19,9 +19,7 @@ export async function handleCountTokens(c: Context) {
 
     const openAIPayload = translateToOpenAI(anthropicPayload)
 
-    const selectedModel = state.models?.data.find(
-      (model) => model.id === anthropicPayload.model,
-    )
+    const selectedModel = resolveModel(anthropicPayload.model)
 
     if (!selectedModel) {
       consola.warn("Model not found, returning default token count")
@@ -31,6 +29,7 @@ export async function handleCountTokens(c: Context) {
     }
 
     const tokenCount = await getTokenCount(openAIPayload, selectedModel)
+    const effectiveModelId = selectedModel.id
 
     if (anthropicPayload.tools && anthropicPayload.tools.length > 0) {
       let mcpToolExist = false
@@ -40,19 +39,19 @@ export async function handleCountTokens(c: Context) {
         )
       }
       if (!mcpToolExist) {
-        if (anthropicPayload.model.startsWith("claude")) {
+        if (effectiveModelId.startsWith("claude")) {
           // https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview#pricing
           tokenCount.input = tokenCount.input + 346
-        } else if (anthropicPayload.model.startsWith("grok")) {
+        } else if (effectiveModelId.startsWith("grok")) {
           tokenCount.input = tokenCount.input + 480
         }
       }
     }
 
     let finalTokenCount = tokenCount.input + tokenCount.output
-    if (anthropicPayload.model.startsWith("claude")) {
+    if (effectiveModelId.startsWith("claude")) {
       finalTokenCount = Math.round(finalTokenCount * 1.15)
-    } else if (anthropicPayload.model.startsWith("grok")) {
+    } else if (effectiveModelId.startsWith("grok")) {
       finalTokenCount = Math.round(finalTokenCount * 1.03)
     }
 

@@ -44,6 +44,83 @@ A reverse-engineered proxy for the GitHub Copilot API that exposes it as an Open
 
 https://github.com/user-attachments/assets/7654b383-669d-4eb9-b23c-06d7aefee8c5
 
+## Quick Start: Claude Code with Copilot
+
+最快上手方式——一键安装并启动 Claude Code：
+
+```bash
+# 1. 安装引导（检查依赖、认证、配置 shell、生成 launchd plist）
+./setup.sh
+
+# 2. 重载 shell 配置
+source ~/.zshrc   # 或 source ~/.bashrc
+
+# 3. 启动
+claude-copilot                # 默认 sonnet 模型
+claude-copilot -m opus        # opus-4.7，高推理 effort
+claude-copilot -m opus-med    # opus-4.7，中推理 effort（推荐日常使用）
+claude-copilot -m haiku       # haiku，省配额
+```
+
+### 模型档位说明
+
+`claude-copilot` 支持三层模型分工，Claude Code 会根据任务复杂度自动选择：
+
+| 环境变量 | 用途 | 默认配置 |
+|---------|------|---------|
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | 复杂任务：规划、架构决策、多步推理 | `claude-opus-4.7` |
+| `ANTHROPIC_MODEL` / `ANTHROPIC_DEFAULT_SONNET_MODEL` | 常规任务：写代码、单测、调试 | `claude-sonnet-4.6` |
+| `ANTHROPIC_SMALL_FAST_MODEL` / `ANTHROPIC_DEFAULT_HAIKU_MODEL` | 轻量任务：工具调用、文件读写、背景任务 | `claude-haiku-4.5` |
+
+**`-m` 参数对应关系：**
+
+| 参数 | 主模型 | Effort | 适用场景 |
+|-----|-------|--------|---------|
+| `sonnet`（默认）| sonnet-4.6 | 无 | 日常编码，subagent 用 opus-4.7 |
+| `opus` / `opus47` / `opus-high` | opus-4.7 | `high` | 深度推理、复杂架构 |
+| `opus-med` / `opus47-med` | opus-4.7 | `medium` | 均衡，推荐大多数重任务 |
+| `opus46` | opus-4.6 | 无 | opus-4.6（无 effort 支持） |
+| `haiku` | haiku-4.5 | 无 | 省配额、快速验证 |
+
+> **Reasoning Effort 说明**：仅 `claude-opus-4.7` 支持 effort（`low/medium/high/xhigh/max`）。
+> `opus-4.6`、`sonnet`、`haiku` 设置 effort 无效，proxy 会自动丢弃。
+
+### 常用命令
+
+```bash
+claude-copilot --status       # 检查服务、认证、可用模型
+claude-copilot --usage        # 查看配额用量（premium interactions 等）
+claude-copilot --stop         # 停止服务
+claude-copilot --daemon       # 守护模式（自动重启，Ctrl+C 退出）
+claude-copilot --setup        # 详细环境检查向导
+claude-copilot --port 4141    # 使用自定义端口
+```
+
+### 环境变量配置
+
+可通过以下环境变量覆盖默认行为（在 shell 配置文件中设置）：
+
+```bash
+export COPILOT_PORT=1234                  # 服务端口
+export COPILOT_SCRIPT_DIR=/path/to/repo   # copilot-api 源码目录
+export COPILOT_TIMEOUT_MS=3000000         # API 超时（毫秒）
+export COPILOT_AUTH_FILE=~/.local/share/copilot-api/github_token  # token 路径
+```
+
+### Shell 集成
+
+`claude-copilot.sh` 是一个可 source 的 shell 函数文件，支持 zsh / bash：
+
+```bash
+# 手动添加到 ~/.zshrc 或 ~/.bashrc
+export COPILOT_SCRIPT_DIR="/path/to/copilot-api"
+source "$COPILOT_SCRIPT_DIR/claude-copilot.sh"
+```
+
+或直接运行 `./setup.sh` 自动完成配置。
+
+---
+
 ## Prerequisites
 
 - Bun (>= 1.2.x)

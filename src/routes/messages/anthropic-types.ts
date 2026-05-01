@@ -19,9 +19,10 @@ export interface AnthropicMessagesPayload {
     name?: string
   }
   thinking?: {
-    type: "enabled"
+    type: "enabled" | "adaptive"
     budget_tokens?: number
   }
+  reasoning_effort?: "none" | "low" | "medium" | "high" | "max" | "xhigh"
   service_tier?: "auto" | "standard_only"
 }
 

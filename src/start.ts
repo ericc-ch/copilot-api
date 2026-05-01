@@ -117,7 +117,14 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   serve({
     fetch: server.fetch as ServerHandler,
     port: options.port,
-  })
+    reusePort: true,
+    bun: {
+      // Bun default is 10s; cap at 255 (Bun max) so subagent long-poll / keep-alive
+      // connections aren't killed mid-stream, which surfaces as
+      // "socket connection was closed unexpectedly" on the Claude Code side.
+      idleTimeout: 255,
+    },
+  } as Parameters<typeof serve>[0])
 }
 
 export const start = defineCommand({

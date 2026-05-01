@@ -1,4 +1,8 @@
+import consola from "consola"
+
+import { isClaudeOpus47Model, resolveModelId } from "~/lib/models"
 import {
+  sanitizeReasoningEffortForModel,
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
   type ContentPart,
@@ -40,20 +44,220 @@ export function translateToOpenAI(
     stream: payload.stream,
     temperature: payload.temperature,
     top_p: payload.top_p,
+    thinking: translateThinking(payload),
+    output_config: translateOutputConfig(payload),
+    reasoning_effort: translateReasoningEffort(payload),
     user: payload.metadata?.user_id,
     tools: translateAnthropicToolsToOpenAI(payload.tools),
     tool_choice: translateAnthropicToolChoiceToOpenAI(payload.tool_choice),
   }
 }
 
-function translateModelName(model: string): string {
-  // Subagent requests use a specific model number which Copilot doesn't support
-  if (model.startsWith("claude-sonnet-4-")) {
-    return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
-  } else if (model.startsWith("claude-opus-")) {
-    return model.replace(/^claude-opus-4-.*/, "claude-opus-4")
+function isClaudeModel(modelId: string): boolean {
+  return modelId.startsWith("claude-")
+}
+
+type ClaudeOpus47Effort = NonNullable<
+  NonNullable<ChatCompletionsPayload["output_config"]>["effort"]
+>
+
+// Per-model effort caps. Upstream rejects efforts above the model's tier.
+// TODO: keep in sync with the mirror in services/copilot/create-chat-completions.ts.
+// 2026-04 probe: upstream now accepts low/medium/high/xhigh/max for opus-4.7
+// (and silently ignores unknown values), so the cap is opened up. Keep the
+// helper in place so we can re-tighten without restructuring callers.
+const OPUS_47_ALLOWED_EFFORTS: Array<ClaudeOpus47Effort> = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]
+
+function getAllowedClaudeEfforts(modelId: string): Array<ClaudeOpus47Effort> {
+  if (isClaudeOpus47Model(modelId)) {
+    return OPUS_47_ALLOWED_EFFORTS
   }
-  return model
+  return []
+}
+
+function capClaudeEffort(
+  modelId: string,
+  effort: ClaudeOpus47Effort | undefined,
+): ClaudeOpus47Effort | undefined {
+  if (!effort) {
+    return undefined
+  }
+  const allowed = getAllowedClaudeEfforts(modelId)
+  if (allowed.length === 0) {
+    return effort
+  }
+  if (allowed.includes(effort)) {
+    return effort
+  }
+  const capped = allowed.at(-1)
+  consola.warn(
+    `[${modelId}] effort "${effort}" exceeds cap; downgraded to "${capped}"`,
+  )
+  return capped
+}
+
+function normalizeClaudeEffort(
+  value: string | undefined,
+): ClaudeOpus47Effort | undefined {
+  switch (value?.toLowerCase()) {
+    case "low": {
+      return "low"
+    }
+    case "medium": {
+      return "medium"
+    }
+    case "high": {
+      return "high"
+    }
+    case "xhigh": {
+      return "xhigh"
+    }
+    case "max": {
+      return "max"
+    }
+    default: {
+      return undefined
+    }
+  }
+}
+
+function getClaudeOpus47Effort(
+  payload: AnthropicMessagesPayload,
+): ClaudeOpus47Effort | undefined {
+  const explicitEffort = normalizeClaudeEffort(payload.reasoning_effort)
+  if (explicitEffort) {
+    return explicitEffort
+  }
+
+  if (payload.thinking?.type !== "enabled") {
+    return undefined
+  }
+
+  const budgetTokens = payload.thinking.budget_tokens
+  if (budgetTokens === undefined) {
+    return "medium"
+  }
+
+  if (budgetTokens <= 2_048) {
+    return "low"
+  }
+
+  if (budgetTokens <= 8_192) {
+    return "medium"
+  }
+
+  if (budgetTokens <= 24_576) {
+    return "high"
+  }
+
+  return "xhigh"
+}
+
+function translateThinking(
+  payload: AnthropicMessagesPayload,
+): ChatCompletionsPayload["thinking"] {
+  // Always drop the thinking field. Upstream Copilot opus-4.7 controls
+  // reasoning depth via output_config.effort instead. Forwarding the Anthropic
+  // thinking field has caused 400s ("Input tag 'adaptive'...") even after
+  // coercing type to "enabled" — the upstream validator appears to scan the
+  // overall request body, including conversation content, for thinking-shaped
+  // strings, which is fragile. Effort already conveys intent; thinking is
+  // redundant for this provider.
+  void payload
+  return undefined
+}
+
+function translateOutputConfig(
+  payload: AnthropicMessagesPayload,
+): ChatCompletionsPayload["output_config"] {
+  const modelId = translateModelName(payload.model)
+
+  if (!isClaudeOpus47Model(modelId)) {
+    return undefined
+  }
+
+  const raw = getClaudeOpus47Effort(payload)
+  const capped = capClaudeEffort(modelId, raw)
+
+  return capped ? { effort: capped } : undefined
+}
+
+function translateReasoningEffort(
+  payload: AnthropicMessagesPayload,
+): ChatCompletionsPayload["reasoning_effort"] {
+  const modelId = translateModelName(payload.model)
+
+  if (isClaudeModel(modelId)) {
+    return undefined
+  }
+
+  if (payload.reasoning_effort) {
+    return sanitizeReasoningEffortForModel(
+      modelId,
+      normalizeReasoningEffort(payload.reasoning_effort),
+    )
+  }
+
+  if (payload.thinking?.type !== "enabled") {
+    return undefined
+  }
+
+  const budgetTokens = payload.thinking.budget_tokens
+  if (budgetTokens === undefined) {
+    return "medium"
+  }
+
+  if (budgetTokens <= 2_048) {
+    return "low"
+  }
+
+  if (budgetTokens <= 8_192) {
+    return "medium"
+  }
+
+  if (budgetTokens <= 24_576) {
+    return sanitizeReasoningEffortForModel(modelId, "high")
+  }
+
+  return sanitizeReasoningEffortForModel(modelId, "xhigh")
+}
+
+function normalizeReasoningEffort(
+  value: string,
+): ChatCompletionsPayload["reasoning_effort"] {
+  switch (value.toLowerCase()) {
+    case "none": {
+      return "none"
+    }
+    case "low": {
+      return "low"
+    }
+    case "medium": {
+      return "medium"
+    }
+    case "high": {
+      return "high"
+    }
+    case "xhigh": {
+      return "xhigh"
+    }
+    case "max": {
+      return "max"
+    }
+    default: {
+      return undefined
+    }
+  }
+}
+
+function translateModelName(model: string): string {
+  return resolveModelId(model)
 }
 
 function translateAnthropicMessagesToOpenAI(

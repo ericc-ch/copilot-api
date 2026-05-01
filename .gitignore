@@ -12,3 +12,12 @@ node_modules/
 
 # build output
 dist/
+
+# runtime artifacts
+server.log
+server.pid
+.eket/
+.eket-*.log
+
+# docker data
+copilot-data/

@@ -199,6 +199,124 @@ describe("Anthropic to OpenAI translation logic", () => {
   })
 })
 
+describe("opus-4.7 thinking + effort translation", () => {
+  // Note: translateToOpenAI calls resolveModelId which falls back to
+  // stripSnapshotSuffix when state.models is empty. "claude-opus-4.7",
+  // "claude-sonnet-4", and "gpt-5" all survive that path unchanged.
+
+  test("thinking.enabled is dropped (upstream uses output_config.effort instead)", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.7",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "enabled", budget_tokens: 4096 },
+    }
+    const out = translateToOpenAI(payload)
+    expect(out.thinking).toBeUndefined()
+  })
+
+  test("thinking.enabled without budget_tokens is also dropped", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.7",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "enabled" },
+    }
+    const out = translateToOpenAI(payload)
+    expect(out.thinking).toBeUndefined()
+  })
+
+  test("thinking.adaptive is dropped (no thinking field reaches upstream)", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.7",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "adaptive" },
+    }
+    const out = translateToOpenAI(payload)
+    expect(out.thinking).toBeUndefined()
+  })
+
+  test("reasoning_effort=high passes through (cap opened up)", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.7",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "high",
+    }
+    const out = translateToOpenAI(payload)
+    expect(out.output_config?.effort).toBe("high")
+  })
+
+  test("reasoning_effort=max passes through (cap opened up)", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.7",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "max",
+    }
+    const out = translateToOpenAI(payload)
+    expect(out.output_config?.effort).toBe("max")
+  })
+
+  test("budget_tokens=24576 maps to high (cap opened up)", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.7",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "enabled", budget_tokens: 24_576 },
+    }
+    const out = translateToOpenAI(payload)
+    expect(out.output_config?.effort).toBe("high")
+  })
+
+  test("reasoning_effort=medium kept as medium", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.7",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "medium",
+    }
+    const out = translateToOpenAI(payload)
+    expect(out.output_config?.effort).toBe("medium")
+  })
+
+  test("reasoning_effort=low kept as low", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-opus-4.7",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "low",
+    }
+    const out = translateToOpenAI(payload)
+    expect(out.output_config?.effort).toBe("low")
+  })
+
+  test("gpt-5 path unaffected: reasoning_effort goes through, no output_config", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "gpt-5",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: "high",
+    }
+    const out = translateToOpenAI(payload)
+    expect(out.output_config).toBeUndefined()
+    expect(out.reasoning_effort).toBe("high")
+  })
+
+  test("non-opus claude: no thinking, no output_config injected", () => {
+    const payload: AnthropicMessagesPayload = {
+      model: "claude-sonnet-4",
+      max_tokens: 64,
+      messages: [{ role: "user", content: "hi" }],
+      thinking: { type: "enabled" },
+    }
+    const out = translateToOpenAI(payload)
+    expect(out.thinking).toBeUndefined()
+    expect(out.output_config).toBeUndefined()
+  })
+})
+
 describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => {
   test("should return true for a minimal valid request payload", () => {
     const validPayload = {
