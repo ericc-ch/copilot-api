@@ -306,7 +306,7 @@ Here is an example `.claude/settings.json` file:
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:4141",
-    "ANTHROPIC_AUTH_TOKEN": "dummy",
+    "ANTHROPIC_AUTH_KEY": "dummy",
     "ANTHROPIC_MODEL": "gpt-4.1",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-4.1",
     "ANTHROPIC_SMALL_FAST_MODEL": "gpt-4.1",
