@@ -1,6 +1,8 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
 
+import type { Model } from "~/services/copilot/get-models"
+
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
@@ -10,7 +12,9 @@ export const createChatCompletions = async (
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
-  const enableVision = payload.messages.some(
+  const requestPayload = normalizeCompletionTokenParam(payload)
+
+  const enableVision = requestPayload.messages.some(
     (x) =>
       typeof x.content !== "string"
       && x.content?.some((x) => x.type === "image_url"),
@@ -18,7 +22,7 @@ export const createChatCompletions = async (
 
   // Agent/user check for X-Initiator header
   // Determine if any message is from an agent ("assistant" or "tool")
-  const isAgentCall = payload.messages.some((msg) =>
+  const isAgentCall = requestPayload.messages.some((msg) =>
     ["assistant", "tool"].includes(msg.role),
   )
 
@@ -31,7 +35,7 @@ export const createChatCompletions = async (
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
     method: "POST",
     headers,
-    body: JSON.stringify(payload),
+    body: JSON.stringify(requestPayload),
   })
 
   if (!response.ok) {
@@ -39,11 +43,57 @@ export const createChatCompletions = async (
     throw new HTTPError("Failed to create chat completions", response)
   }
 
-  if (payload.stream) {
+  if (requestPayload.stream) {
     return events(response)
   }
 
   return (await response.json()) as ChatCompletionResponse
+}
+
+function normalizeCompletionTokenParam(
+  payload: ChatCompletionsPayload,
+): ChatCompletionsPayload {
+  if (
+    !shouldMapToMaxCompletionTokens(payload)
+    || (payload.max_completion_tokens !== undefined
+      && payload.max_completion_tokens !== null)
+  ) {
+    return payload
+  }
+
+  if (payload.max_tokens === undefined || payload.max_tokens === null) {
+    return payload
+  }
+
+  const { max_tokens, ...rest } = payload
+
+  return {
+    ...rest,
+    max_completion_tokens: max_tokens,
+  }
+}
+
+function shouldMapToMaxCompletionTokens(
+  payload: ChatCompletionsPayload,
+): boolean {
+  const model = state.models?.data.find((entry) => entry.id === payload.model)
+
+  if (model) {
+    return isOpenAIModel(model)
+  }
+
+  return isLikelyOpenAIModelId(payload.model)
+}
+
+function isOpenAIModel(model: Model): boolean {
+  return (
+    model.vendor.toLowerCase() === "openai"
+    || model.capabilities.family.toLowerCase().includes("openai")
+  )
+}
+
+function isLikelyOpenAIModelId(modelId: string): boolean {
+  return /^(?:gpt|chatgpt|o[134]|codex)(?:[.-]|$)/.test(modelId)
 }
 
 // Streaming types
@@ -130,6 +180,7 @@ export interface ChatCompletionsPayload {
   temperature?: number | null
   top_p?: number | null
   max_tokens?: number | null
+  max_completion_tokens?: number | null
   stop?: string | Array<string> | null
   n?: number | null
   stream?: boolean | null
