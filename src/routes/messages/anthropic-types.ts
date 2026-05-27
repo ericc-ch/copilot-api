@@ -201,6 +201,8 @@ export interface AnthropicStreamState {
       id: string
       name: string
       anthropicBlockIndex: number
+      arguments?: string
+      inputEmitted?: boolean
     }
   }
 }

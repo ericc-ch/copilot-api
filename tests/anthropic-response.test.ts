@@ -10,6 +10,8 @@ import { type AnthropicStreamState } from "~/routes/messages/anthropic-types"
 import { translateToAnthropic } from "~/routes/messages/non-stream-translation"
 import { translateChunkToAnthropicEvents } from "~/routes/messages/stream-translation"
 
+const READ_FILE_PATH = String.raw`C:\dev\greco\CLAUDE.md`
+
 const anthropicUsageSchema = z.object({
   input_tokens: z.number().int(),
   output_tokens: z.number().int(),
@@ -154,6 +156,59 @@ describe("OpenAI to Anthropic Non-Streaming Response Translation", () => {
       expect(anthropicResponse.content[0].name).toBe("get_current_weather")
       expect(anthropicResponse.content[0].input).toEqual({
         location: "Boston, MA",
+      })
+    } else {
+      throw new Error("Expected tool_use block")
+    }
+  })
+
+  test("should remove unsupported Claude Code Read parameters from tool calls", () => {
+    const openAIResponse: ChatCompletionResponse = {
+      id: "chatcmpl-read",
+      object: "chat.completion",
+      created: 1677652288,
+      model: "gpt-4o-2024-05-13",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "call_read",
+                type: "function",
+                function: {
+                  name: "Read",
+                  arguments: JSON.stringify({
+                    file_path: READ_FILE_PATH,
+                    offset: 52,
+                    limit: 8,
+                    pages: "",
+                  }),
+                },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+          logprobs: null,
+        },
+      ],
+      usage: {
+        prompt_tokens: 30,
+        completion_tokens: 20,
+        total_tokens: 50,
+      },
+    }
+
+    const anthropicResponse = translateToAnthropic(openAIResponse)
+
+    expect(anthropicResponse.content[0].type).toBe("tool_use")
+    if (anthropicResponse.content[0].type === "tool_use") {
+      expect(anthropicResponse.content[0].input).toEqual({
+        file_path: READ_FILE_PATH,
+        offset: 52,
+        limit: 8,
       })
     } else {
       throw new Error("Expected tool_use block")
@@ -361,5 +416,101 @@ describe("OpenAI to Anthropic Streaming Response Translation", () => {
     for (const event of translatedStream) {
       expect(isValidAnthropicStreamEvent(event)).toBe(true)
     }
+  })
+})
+
+describe("Claude Code Read tool sanitization", () => {
+  test("should remove unsupported Claude Code Read parameters from streaming tool calls", () => {
+    const openAIStream: Array<ChatCompletionChunk> = [
+      {
+        id: "cmpl-read",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_read",
+                  type: "function",
+                  function: { name: "Read", arguments: "" },
+                },
+              ],
+            },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-read",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  function: {
+                    arguments: JSON.stringify({
+                      file_path: READ_FILE_PATH,
+                      offset: 52,
+                      limit: 8,
+                      pages: "",
+                    }),
+                  },
+                },
+              ],
+            },
+            finish_reason: null,
+            logprobs: null,
+          },
+        ],
+      },
+      {
+        id: "cmpl-read",
+        object: "chat.completion.chunk",
+        created: 1677652288,
+        model: "gpt-4o-2024-05-13",
+        choices: [
+          { index: 0, delta: {}, finish_reason: "tool_calls", logprobs: null },
+        ],
+      },
+    ]
+
+    const streamState: AnthropicStreamState = {
+      messageStartSent: false,
+      contentBlockIndex: 0,
+      contentBlockOpen: false,
+      toolCalls: {},
+    }
+    const translatedStream = openAIStream.flatMap((chunk) =>
+      translateChunkToAnthropicEvents(chunk, streamState),
+    )
+    const inputJsonDeltas = translatedStream.filter(
+      (event) =>
+        event.type === "content_block_delta"
+        && event.delta.type === "input_json_delta",
+    )
+
+    expect(inputJsonDeltas).toHaveLength(1)
+    const [inputJsonDelta] = inputJsonDeltas
+    if (
+      inputJsonDelta.type !== "content_block_delta"
+      || inputJsonDelta.delta.type !== "input_json_delta"
+    ) {
+      throw new Error("Expected input_json_delta event")
+    }
+    expect(JSON.parse(inputJsonDelta.delta.partial_json)).toEqual({
+      file_path: READ_FILE_PATH,
+      offset: 52,
+      limit: 8,
+    })
   })
 })

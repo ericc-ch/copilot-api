@@ -4,16 +4,97 @@ import {
   type AnthropicStreamEventData,
   type AnthropicStreamState,
 } from "./anthropic-types"
-import { mapOpenAIStopReasonToAnthropic } from "./utils"
+import {
+  mapOpenAIStopReasonToAnthropic,
+  sanitizeClaudeCodeToolInput,
+} from "./utils"
+
+type ToolCallStreamInfo = AnthropicStreamState["toolCalls"][number]
 
 function isToolBlockOpen(state: AnthropicStreamState): boolean {
   if (!state.contentBlockOpen) {
     return false
   }
+
   // Check if the current block index corresponds to any known tool call
   return Object.values(state.toolCalls).some(
     (tc) => tc.anthropicBlockIndex === state.contentBlockIndex,
   )
+}
+
+function parseToolArguments(argumentsText: string): Record<string, unknown> {
+  try {
+    return JSON.parse(argumentsText) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+function getCurrentToolCallInfo(state: AnthropicStreamState) {
+  return Object.values(state.toolCalls).find(
+    (tc) => tc.anthropicBlockIndex === state.contentBlockIndex,
+  )
+}
+
+function emitReadInputIfNeeded(
+  events: Array<AnthropicStreamEventData>,
+  state: AnthropicStreamState,
+): void {
+  const toolCallInfo = getCurrentToolCallInfo(state)
+  if (
+    !toolCallInfo
+    || toolCallInfo.name !== "Read"
+    || toolCallInfo.inputEmitted
+  ) {
+    return
+  }
+
+  events.push({
+    type: "content_block_delta",
+    index: toolCallInfo.anthropicBlockIndex,
+    delta: {
+      type: "input_json_delta",
+      partial_json: JSON.stringify(
+        sanitizeClaudeCodeToolInput(
+          toolCallInfo.name,
+          parseToolArguments(toolCallInfo.arguments ?? "{}"),
+        ),
+      ),
+    },
+  })
+  toolCallInfo.inputEmitted = true
+}
+
+function closeCurrentBlock(
+  events: Array<AnthropicStreamEventData>,
+  state: AnthropicStreamState,
+): void {
+  emitReadInputIfNeeded(events, state)
+  events.push({
+    type: "content_block_stop",
+    index: state.contentBlockIndex,
+  })
+  state.contentBlockOpen = false
+}
+
+function appendToolArguments(
+  events: Array<AnthropicStreamEventData>,
+  toolCallInfo: ToolCallStreamInfo,
+  argumentsText: string,
+): void {
+  if (toolCallInfo.name === "Read") {
+    toolCallInfo.arguments = (toolCallInfo.arguments ?? "") + argumentsText
+    return
+  }
+
+  events.push({
+    type: "content_block_delta",
+    index: toolCallInfo.anthropicBlockIndex,
+    delta: {
+      type: "input_json_delta",
+      partial_json: argumentsText,
+    },
+  })
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity
@@ -60,12 +141,8 @@ export function translateChunkToAnthropicEvents(
   if (delta.content) {
     if (isToolBlockOpen(state)) {
       // A tool block was open, so close it before starting a text block.
-      events.push({
-        type: "content_block_stop",
-        index: state.contentBlockIndex,
-      })
+      closeCurrentBlock(events, state)
       state.contentBlockIndex++
-      state.contentBlockOpen = false
     }
 
     if (!state.contentBlockOpen) {
@@ -109,6 +186,7 @@ export function translateChunkToAnthropicEvents(
           id: toolCall.id,
           name: toolCall.function.name,
           anthropicBlockIndex,
+          arguments: toolCall.function.arguments ?? "",
         }
 
         events.push({
@@ -129,14 +207,7 @@ export function translateChunkToAnthropicEvents(
         // Tool call can still be empty
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (toolCallInfo) {
-          events.push({
-            type: "content_block_delta",
-            index: toolCallInfo.anthropicBlockIndex,
-            delta: {
-              type: "input_json_delta",
-              partial_json: toolCall.function.arguments,
-            },
-          })
+          appendToolArguments(events, toolCallInfo, toolCall.function.arguments)
         }
       }
     }
@@ -144,11 +215,7 @@ export function translateChunkToAnthropicEvents(
 
   if (choice.finish_reason) {
     if (state.contentBlockOpen) {
-      events.push({
-        type: "content_block_stop",
-        index: state.contentBlockIndex,
-      })
-      state.contentBlockOpen = false
+      closeCurrentBlock(events, state)
     }
 
     events.push(

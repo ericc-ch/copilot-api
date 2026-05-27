@@ -22,7 +22,10 @@ import {
   type AnthropicUserContentBlock,
   type AnthropicUserMessage,
 } from "./anthropic-types"
-import { mapOpenAIStopReasonToAnthropic } from "./utils"
+import {
+  mapOpenAIStopReasonToAnthropic,
+  sanitizeClaudeCodeToolInput,
+} from "./utils"
 
 // Payload translation
 
@@ -163,7 +166,9 @@ function handleAssistantMessage(
             type: "function",
             function: {
               name: toolUse.name,
-              arguments: JSON.stringify(toolUse.input),
+              arguments: JSON.stringify(
+                sanitizeClaudeCodeToolInput(toolUse.name, toolUse.input),
+              ),
             },
           })),
         },
@@ -352,6 +357,9 @@ function getAnthropicToolUseBlocks(
     type: "tool_use",
     id: toolCall.id,
     name: toolCall.function.name,
-    input: JSON.parse(toolCall.function.arguments) as Record<string, unknown>,
+    input: sanitizeClaudeCodeToolInput(
+      toolCall.function.name,
+      JSON.parse(toolCall.function.arguments) as Record<string, unknown>,
+    ),
   }))
 }
