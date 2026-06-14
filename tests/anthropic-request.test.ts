@@ -140,6 +140,7 @@ describe("Anthropic to OpenAI translation logic", () => {
             { type: "text", text: "2+2 equals 4." },
           ],
         },
+        { role: "user", content: "Thanks! And what is 3+3?" },
       ],
       max_tokens: 100,
     }
@@ -196,6 +197,70 @@ describe("Anthropic to OpenAI translation logic", () => {
     )
     expect(assistantMessage?.tool_calls).toHaveLength(1)
     expect(assistantMessage?.tool_calls?.[0].function.name).toBe("get_weather")
+  })
+
+  test("should rewrite a trailing assistant prefill into a user message", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [
+        { role: "user", content: "Give me a JSON object for the sky color." },
+        { role: "assistant", content: '{"color": "' },
+      ],
+      max_tokens: 100,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    // Upstream rejects a request ending with an assistant message, so the
+    // conversation must end with a user message.
+    const lastMessage = openAIPayload.messages.at(-1)
+    expect(lastMessage?.role).toBe("user")
+    expect(openAIPayload.messages.some((m) => m.role === "assistant")).toBe(
+      false,
+    )
+    // The prefill text is preserved inside the injected user instruction.
+    expect(lastMessage?.content).toContain('{"color": "')
+  })
+
+  test("should rewrite an empty trailing assistant prefill", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "" },
+      ],
+      max_tokens: 100,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    const lastMessage = openAIPayload.messages.at(-1)
+    expect(lastMessage?.role).toBe("user")
+    expect(lastMessage?.content).toBe("Continue.")
+  })
+
+  test("should not treat a trailing assistant tool call as a prefill", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-3-5-sonnet-20241022",
+      messages: [
+        { role: "user", content: "What's the weather?" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "call_123",
+              name: "get_weather",
+              input: { location: "New York" },
+            },
+          ],
+        },
+      ],
+      max_tokens: 100,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    const lastMessage = openAIPayload.messages.at(-1)
+    expect(lastMessage?.role).toBe("assistant")
+    expect(lastMessage?.tool_calls).toHaveLength(1)
   })
 })
 
