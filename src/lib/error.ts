@@ -7,8 +7,25 @@ export class HTTPError extends Error {
   response: Response
 
   constructor(message: string, response: Response) {
-    super(message)
+    super(`${message} (${response.status} ${response.statusText})`)
     this.response = response
+  }
+}
+
+export async function getHTTPErrorDetails(error: HTTPError): Promise<unknown> {
+  const errorText = await error.response.clone().text()
+
+  if (!errorText) {
+    return {
+      status: error.response.status,
+      statusText: error.response.statusText,
+    }
+  }
+
+  try {
+    return JSON.parse(errorText) as unknown
+  } catch {
+    return errorText
   }
 }
 
