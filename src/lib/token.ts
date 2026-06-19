@@ -7,7 +7,7 @@ import { getDeviceCode } from "~/services/github/get-device-code"
 import { getGitHubUser } from "~/services/github/get-user"
 import { pollAccessToken } from "~/services/github/poll-access-token"
 
-import { HTTPError } from "./error"
+import { HTTPError, getHTTPErrorDetails } from "./error"
 import { state } from "./state"
 
 const readGithubToken = () => fs.readFile(PATHS.GITHUB_TOKEN_PATH, "utf8")
@@ -16,16 +16,32 @@ const writeGithubToken = (token: string) =>
   fs.writeFile(PATHS.GITHUB_TOKEN_PATH, token)
 
 export const setupCopilotToken = async () => {
-  const { token, refresh_in } = await getCopilotToken()
-  state.copilotToken = token
+  let refreshIn: number
+
+  try {
+    const { token, refresh_in } = await getCopilotToken()
+    state.copilotToken = token
+    refreshIn = refresh_in
+  } catch (error) {
+    if (error instanceof HTTPError) {
+      consola.error(
+        "Failed to get Copilot token:",
+        await getHTTPErrorDetails(error),
+      )
+      throw error
+    }
+
+    consola.error("Failed to get Copilot token:", error)
+    throw error
+  }
 
   // Display the Copilot token to the screen
   consola.debug("GitHub Copilot Token fetched successfully!")
   if (state.showToken) {
-    consola.info("Copilot token:", token)
+    consola.info("Copilot token:", state.copilotToken)
   }
 
-  const refreshInterval = (refresh_in - 60) * 1000
+  const refreshInterval = (refreshIn - 60) * 1000
   setInterval(async () => {
     consola.debug("Refreshing Copilot token")
     try {
@@ -36,6 +52,14 @@ export const setupCopilotToken = async () => {
         consola.info("Refreshed Copilot token:", token)
       }
     } catch (error) {
+      if (error instanceof HTTPError) {
+        consola.error(
+          "Failed to refresh Copilot token:",
+          await getHTTPErrorDetails(error),
+        )
+        throw error
+      }
+
       consola.error("Failed to refresh Copilot token:", error)
       throw error
     }
@@ -80,7 +104,10 @@ export async function setupGitHubToken(
     await logUser()
   } catch (error) {
     if (error instanceof HTTPError) {
-      consola.error("Failed to get GitHub token:", await error.response.json())
+      consola.error(
+        "Failed to get GitHub token:",
+        await getHTTPErrorDetails(error),
+      )
       throw error
     }
 
