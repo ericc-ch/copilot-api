@@ -234,14 +234,20 @@ function translateAnthropicToolsToOpenAI(
   if (!anthropicTools) {
     return undefined
   }
-  return anthropicTools.map((tool) => ({
-    type: "function",
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.input_schema,
-    },
-  }))
+  return anthropicTools.flatMap((tool) =>
+    "input_schema" in tool ?
+      [
+        {
+          type: "function" as const,
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.input_schema,
+          },
+        },
+      ]
+    : [],
+  )
 }
 
 function translateAnthropicToolChoiceToOpenAI(
