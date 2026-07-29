@@ -3,7 +3,7 @@
 ## Build, Lint, and Test Commands
 
 - **Build:**  
-  `bun run build` (uses tsup)
+  `bun run build` (uses tsdown)
 - **Dev:**  
   `bun run dev`
 - **Lint:**  
@@ -13,7 +13,7 @@
 - **Test all:**  
    `bun test`
 - **Test single file:**  
-   `bun test tests/claude-request.test.ts`
+   `bun test tests/anthropic-request.test.ts`
 - **Start (prod):**  
   `bun run start`
 

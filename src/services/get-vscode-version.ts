@@ -29,5 +29,3 @@ export async function getVSCodeVersion() {
     clearTimeout(timeout)
   }
 }
-
-await getVSCodeVersion()

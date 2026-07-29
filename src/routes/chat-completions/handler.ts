@@ -13,6 +13,14 @@ import {
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
 } from "~/services/copilot/create-chat-completions"
+import {
+  createResponsesFromChatCompletions,
+  responseEventToChatChunks,
+  responseToChatCompletion,
+  shouldUseResponsesEndpoint,
+  type ResponseApiResponse,
+  type ResponsesStreamState,
+} from "~/services/copilot/create-responses"
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
@@ -47,6 +55,36 @@ export async function handleCompletion(c: Context) {
     consola.debug("Set max_tokens to:", JSON.stringify(payload.max_tokens))
   }
 
+  if (shouldUseResponsesEndpoint(selectedModel?.supported_endpoints)) {
+    const response = await createResponsesFromChatCompletions(payload)
+
+    if (isNonStreamingResponse(response)) {
+      consola.debug("Non-streaming response:", JSON.stringify(response))
+      return c.json(responseToChatCompletion(response))
+    }
+
+    consola.debug("Streaming response from responses endpoint")
+    return streamSSE(c, async (stream) => {
+      const streamState: ResponsesStreamState = {
+        id: "",
+        model: payload.model,
+        created: Math.floor(Date.now() / 1000),
+        roleSent: false,
+      }
+
+      for await (const event of response) {
+        if (!event.data) continue
+
+        const chunks = responseEventToChatChunks(event.data, streamState)
+        for (const chunk of chunks) {
+          await stream.writeSSE({
+            data: chunk === "[DONE]" ? chunk : JSON.stringify(chunk),
+          })
+        }
+      }
+    })
+  }
+
   const response = await createChatCompletions(payload)
 
   if (isNonStreaming(response)) {
@@ -66,3 +104,7 @@ export async function handleCompletion(c: Context) {
 const isNonStreaming = (
   response: Awaited<ReturnType<typeof createChatCompletions>>,
 ): response is ChatCompletionResponse => Object.hasOwn(response, "choices")
+
+const isNonStreamingResponse = (
+  response: Awaited<ReturnType<typeof createResponsesFromChatCompletions>>,
+): response is ResponseApiResponse => !(Symbol.asyncIterator in response)

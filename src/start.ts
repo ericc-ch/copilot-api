@@ -16,6 +16,7 @@ import { server } from "./server"
 
 interface RunServerOptions {
   port: number
+  host: string
   verbose: boolean
   accountType: string
   manual: boolean
@@ -64,7 +65,14 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
   )
 
-  const serverUrl = `http://localhost:${options.port}`
+  const displayHost = options.host === "0.0.0.0" ? "localhost" : options.host
+  const serverUrl = `http://${displayHost}:${options.port}`
+
+  if (options.host !== "127.0.0.1" && options.host !== "localhost") {
+    consola.warn(
+      `Server will listen on ${options.host} and may be reachable from other machines. Use the default host (127.0.0.1) for local-only access.`,
+    )
+  }
 
   if (options.claudeCode) {
     invariant(state.models, "Models should be loaded by now")
@@ -116,6 +124,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   serve({
     fetch: server.fetch as ServerHandler,
+    hostname: options.host,
     port: options.port,
   })
 }
@@ -131,6 +140,12 @@ export const start = defineCommand({
       type: "string",
       default: "4141",
       description: "Port to listen on",
+    },
+    host: {
+      type: "string",
+      default: "127.0.0.1",
+      description:
+        "Host to bind to. Defaults to 127.0.0.1 (local-only). Use 0.0.0.0 to expose to the network (e.g. inside Docker)",
     },
     verbose: {
       alias: "v",
@@ -193,6 +208,7 @@ export const start = defineCommand({
 
     return runServer({
       port: Number.parseInt(args.port, 10),
+      host: args.host,
       verbose: args.verbose,
       accountType: args["account-type"],
       manual: args.manual,

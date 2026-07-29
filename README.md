@@ -74,25 +74,25 @@ mkdir -p ./copilot-data
 # Run the container with a bind mount to persist the token
 # This ensures your authentication survives container restarts
 
-docker run -p 4141:4141 -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api
+docker run -p 4141:4141 -v $(pwd)/copilot-data:/home/bun/.local/share/copilot-api copilot-api
 ```
 
 > **Note:**
-> The GitHub token and related data will be stored in `copilot-data` on your host. This is mapped to `/root/.local/share/copilot-api` inside the container, ensuring persistence across restarts.
+> The GitHub token and related data will be stored in `copilot-data` on your host. This is mapped to `/home/bun/.local/share/copilot-api` inside the container, ensuring persistence across restarts.
 
 ### Docker with Environment Variables
 
 You can pass the GitHub token directly to the container using environment variables:
 
 ```sh
-# Build with GitHub token
-docker build --build-arg GH_TOKEN=your_github_token_here -t copilot-api .
+# Build the image
+docker build -t copilot-api .
 
 # Run with GitHub token
 docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here copilot-api
 
 # Run with additional options
-docker run -p 4141:4141 -e GH_TOKEN=your_token copilot-api start --verbose --port 4141
+docker run -p 4141:4141 -e GH_TOKEN=your_token copilot-api --verbose --port 4141
 ```
 
 ### Docker Compose Example
@@ -142,6 +142,7 @@ Copilot API now uses a subcommand structure with these main commands:
 
 - `start`: Start the Copilot API server. This command will also handle authentication if needed.
 - `auth`: Run GitHub authentication flow without starting the server. This is typically used if you need to generate a token for use with the `--github-token` option, especially in non-interactive environments.
+- `models`: List the current GitHub Copilot models available to the API. This is useful for non-interactive deployments where you want to inspect model support without starting the server.
 - `check-usage`: Show your current GitHub Copilot usage and quota information directly in the terminal (no server required).
 - `debug`: Display diagnostic information including version, runtime details, file paths, and authentication status. Useful for troubleshooting and support.
 
@@ -154,6 +155,7 @@ The following command line options are available for the `start` command:
 | Option         | Description                                                                   | Default    | Alias |
 | -------------- | ----------------------------------------------------------------------------- | ---------- | ----- |
 | --port         | Port to listen on                                                             | 4141       | -p    |
+| --host         | Host to bind to. Defaults to local-only. Use 0.0.0.0 to expose to the network (e.g. inside Docker) | 127.0.0.1  | none  |
 | --verbose      | Enable verbose logging                                                        | false      | -v    |
 | --account-type | Account type to use (individual, business, enterprise)                        | individual | -a    |
 | --manual       | Enable manual request approval                                                | false      | none  |
@@ -170,6 +172,17 @@ The following command line options are available for the `start` command:
 | ------------ | ------------------------- | ------- | ----- |
 | --verbose    | Enable verbose logging    | false   | -v    |
 | --show-token | Show GitHub token on auth | false   | none  |
+
+### Models Command Options
+
+| Option         | Description                                                                   | Default    | Alias |
+| -------------- | ----------------------------------------------------------------------------- | ---------- | ----- |
+| --verbose      | Enable verbose logging                                                        | false      | -v    |
+| --account-type | Account type to use (individual, business, enterprise)                        | individual | -a    |
+| --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand) | none       | -g    |
+| --show-token   | Show GitHub and Copilot tokens on fetch                                       | false      | none  |
+| --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
+| --json         | Output raw model response as JSON                                             | false      | none  |
 
 ### Debug Command Options
 
@@ -307,10 +320,11 @@ Here is an example `.claude/settings.json` file:
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:4141",
     "ANTHROPIC_AUTH_TOKEN": "dummy",
-    "ANTHROPIC_MODEL": "gpt-4.1",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-4.1",
-    "ANTHROPIC_SMALL_FAST_MODEL": "gpt-4.1",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-4.1",
+    "ANTHROPIC_MODEL": "claude-sonnet-4.6",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4.6",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5",
+    "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4.5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4.5",
     "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   },
@@ -321,6 +335,8 @@ Here is an example `.claude/settings.json` file:
   }
 }
 ```
+
+> **Note:** Available models depend on your GitHub Copilot subscription tier. Run `bun run models` to see the models currently exposed by your account (for example, Copilot Pro+ adds access to newer Claude Opus/Sonnet 5 and GPT‑5.5/5.6‑series models).
 
 You can find more options here: [Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings#environment-variables)
 
@@ -342,6 +358,12 @@ bun run dev
 bun run start
 ```
 
+### List Available Models
+
+```sh
+bun run models
+```
+
 ## Usage Tips
 
 - To avoid hitting GitHub Copilot's rate limits, you can use the following flags:
@@ -349,3 +371,5 @@ bun run start
   - `--rate-limit <seconds>`: Enforces a minimum time interval between requests. For example, `copilot-api start --rate-limit 30` will ensure there's at least a 30-second gap between requests.
   - `--wait`: Use this with `--rate-limit`. It makes the server wait for the cooldown period to end instead of rejecting the request with an error. This is useful for clients that don't automatically retry on rate limit errors.
 - If you have a GitHub business or enterprise plan account with Copilot, use the `--account-type` flag (e.g., `--account-type business`). See the [official documentation](https://docs.github.com/en/enterprise-cloud@latest/copilot/managing-copilot/managing-github-copilot-in-your-organization/managing-access-to-github-copilot-in-your-organization/managing-github-copilot-access-to-your-organizations-network#configuring-copilot-subscription-based-network-routing-for-your-enterprise-or-organization) for more details.
+- This server is designed for localhost or trusted local-network use. It is intentionally single-account: all clients share the same GitHub/Copilot token and model cache.
+- The server binds to `127.0.0.1` by default, so it is not reachable from other machines unless you explicitly pass `--host` (for example `--host 0.0.0.0`). The Docker entrypoint passes `--host 0.0.0.0` so published ports work; restrict exposure on the host side with `-p 127.0.0.1:4141:4141` if you want it local-only.

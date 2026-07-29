@@ -47,11 +47,25 @@ export function translateToOpenAI(
 }
 
 function translateModelName(model: string): string {
-  // Subagent requests use a specific model number which Copilot doesn't support
-  if (model.startsWith("claude-sonnet-4-")) {
-    return model.replace(/^claude-sonnet-4-.*/, "claude-sonnet-4")
-  } else if (model.startsWith("claude-opus-")) {
-    return model.replace(/^claude-opus-4-.*/, "claude-opus-4")
+  // Claude clients may send dated IDs that are not exposed by Copilot.
+  // Keep already-supported dotted IDs unchanged and map only dated aliases.
+  if (/^claude-sonnet-4-5-\d+$/.test(model)) {
+    return "claude-sonnet-4.5"
+  }
+  if (/^claude-sonnet-4-6-\d+$/.test(model)) {
+    return "claude-sonnet-4.6"
+  }
+  if (/^claude-sonnet-4-\d+$/.test(model)) {
+    return "claude-sonnet-4.6"
+  }
+  if (/^claude-opus-4-5-\d+$/.test(model)) {
+    return "claude-opus-4.5"
+  }
+  if (/^claude-opus-4-\d+$/.test(model)) {
+    return "claude-opus-4.5"
+  }
+  if (/^claude-opus-5-\d+$/.test(model)) {
+    return "claude-opus-5"
   }
   return model
 }
@@ -352,6 +366,20 @@ function getAnthropicToolUseBlocks(
     type: "tool_use",
     id: toolCall.id,
     name: toolCall.function.name,
-    input: JSON.parse(toolCall.function.arguments) as Record<string, unknown>,
+    input: safeParseToolInput(toolCall.function.arguments),
   }))
+}
+
+function safeParseToolInput(args: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(args)
+    if (parsed !== null && typeof parsed === "object") {
+      return parsed as Record<string, unknown>
+    }
+    return {}
+  } catch {
+    // Models occasionally emit malformed JSON for tool arguments.
+    // Return an empty input instead of crashing the whole response.
+    return {}
+  }
 }

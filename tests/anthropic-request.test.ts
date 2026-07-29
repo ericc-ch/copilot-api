@@ -63,6 +63,34 @@ function isValidChatCompletionRequest(payload: unknown): boolean {
 }
 
 describe("Anthropic to OpenAI translation logic", () => {
+  test("maps dated Claude IDs to currently supported Copilot models", () => {
+    const sonnet = translateToOpenAI({
+      model: "claude-sonnet-4-20250514",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 100,
+    })
+    const opus = translateToOpenAI({
+      model: "claude-opus-4-20250514",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 100,
+    })
+    const opusNext = translateToOpenAI({
+      model: "claude-opus-5-20251001",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 100,
+    })
+    const current = translateToOpenAI({
+      model: "claude-sonnet-4.6",
+      messages: [{ role: "user", content: "Hello!" }],
+      max_tokens: 100,
+    })
+
+    expect(sonnet.model).toBe("claude-sonnet-4.6")
+    expect(opus.model).toBe("claude-opus-4.5")
+    expect(opusNext.model).toBe("claude-opus-5")
+    expect(current.model).toBe("claude-sonnet-4.6")
+  })
+
   test("should translate minimal Anthropic payload to valid OpenAI payload", () => {
     const anthropicPayload: AnthropicMessagesPayload = {
       model: "gpt-4o",
