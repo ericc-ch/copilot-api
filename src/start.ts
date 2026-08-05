@@ -117,6 +117,13 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   serve({
     fetch: server.fetch as ServerHandler,
     port: options.port,
+    // Bun.serve defaults idleTimeout to 10s, which kills any connection with
+    // no socket activity for 10s. Copilot's /v1/messages holds the response
+    // (headers and/or mid-stream) for the length of upstream generation, so
+    // large completions (e.g. a big Claude Code Edit) routinely exceed 10s of
+    // silence and get cut, surfacing in clients as "Connection closed
+    // mid-response". 0 disables the timeout entirely.
+    bun: { idleTimeout: 0 },
   })
 }
 
