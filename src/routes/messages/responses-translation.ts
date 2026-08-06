@@ -11,6 +11,7 @@ import type {
   ResponseOutputItem,
   ResponseOutputMessage,
   ResponseOutputReasoning,
+  ResponseOutputWebSearchCall,
   ResponsesPayload,
   ResponsesResult,
   ResponseTool,
@@ -25,13 +26,16 @@ import type {
   AnthropicMessage,
   AnthropicMessagesPayload,
   AnthropicResponse,
+  AnthropicServerToolUseBlock,
   AnthropicTextBlock,
   AnthropicThinkingBlock,
   AnthropicTool,
   AnthropicToolResultBlock,
   AnthropicToolUseBlock,
   AnthropicUserMessage,
+  AnthropicWebSearchResult,
   AnthropicWebSearchTool,
+  AnthropicWebSearchToolResultBlock,
 } from "./anthropic-types"
 
 const REASONING_SIGNATURE_SEPARATOR = "@"
@@ -39,6 +43,9 @@ const REASONING_SIGNATURE_SEPARATOR = "@"
 export function translateAnthropicToResponses(
   payload: AnthropicMessagesPayload,
 ): ResponsesPayload {
+  const hasWebSearch = payload.tools?.some(
+    (tool) => "type" in tool && tool.type.startsWith("web_search"),
+  )
   return {
     model: payload.model,
     input: payload.messages.flatMap((message) => translateMessage(message)),
@@ -59,7 +66,11 @@ export function translateAnthropicToResponses(
         },
       }
     : {}),
-    include: ["reasoning.encrypted_content"],
+    include: [
+      "reasoning.encrypted_content",
+      // Search result URLs otherwise stay hidden inside text annotations
+      ...(hasWebSearch ? (["web_search_call.action.sources"] as const) : []),
+    ],
   }
 }
 
@@ -287,6 +298,9 @@ export function translateResponsesToAnthropic(
 ): AnthropicResponse {
   const content = response.output.flatMap((item) => translateOutputItem(item))
   const hasToolUse = content.some((block) => block.type === "tool_use")
+  const webSearchRequests = response.output.filter(
+    (item) => item.type === "web_search_call",
+  ).length
   const inputTokens = response.usage?.input_tokens ?? 0
   const cachedTokens = response.usage?.input_tokens_details?.cached_tokens
   const cacheWriteTokens =
@@ -309,6 +323,9 @@ export function translateResponsesToAnthropic(
       ...(cacheWriteTokens === undefined ?
         {}
       : { cache_creation_input_tokens: cacheWriteTokens }),
+      ...(webSearchRequests > 0 ?
+        { server_tool_use: { web_search_requests: webSearchRequests } }
+      : {}),
     },
   }
 }
@@ -350,7 +367,53 @@ function translateOutputItem(
     return text ? [{ type: "text", text }] : []
   }
 
+  if (isWebSearchCall(item)) {
+    return translateWebSearchCallBlocks(item)
+  }
+
   return []
+}
+
+export function translateWebSearchCallBlocks(
+  call: ResponseOutputWebSearchCall,
+): [AnthropicServerToolUseBlock, AnthropicWebSearchToolResultBlock] {
+  return [
+    {
+      type: "server_tool_use",
+      id: call.id,
+      name: "web_search",
+      input: { query: webSearchQuery(call) },
+    },
+    {
+      type: "web_search_tool_result",
+      tool_use_id: call.id,
+      content: webSearchResults(call),
+    },
+  ]
+}
+
+function webSearchQuery(call: ResponseOutputWebSearchCall): string {
+  if (call.action?.query) return call.action.query
+  return call.action?.queries?.filter(Boolean).join(" | ") ?? ""
+}
+
+function webSearchResults(
+  call: ResponseOutputWebSearchCall,
+): Array<AnthropicWebSearchResult> {
+  return (call.action?.sources ?? []).flatMap((source) =>
+    source.url ?
+      [
+        {
+          type: "web_search_result" as const,
+          url: source.url,
+          title: source.title ?? source.url,
+          page_age: null,
+          // Copilot Responses does not return re-usable result payloads.
+          encrypted_content: "",
+        },
+      ]
+    : [],
+  )
 }
 
 function translateOutputContent(block: ResponseOutputContent): string {
@@ -409,4 +472,10 @@ function isFunctionCall(
   item: ResponseOutputItem,
 ): item is ResponseOutputFunctionCall {
   return item.type === "function_call"
+}
+
+function isWebSearchCall(
+  item: ResponseOutputItem,
+): item is ResponseOutputWebSearchCall {
+  return item.type === "web_search_call"
 }

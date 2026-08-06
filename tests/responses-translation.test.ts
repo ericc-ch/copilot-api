@@ -86,6 +86,10 @@ describe("Anthropic to Responses translation", () => {
         summary: "auto",
       },
       tool_choice: "auto",
+      include: [
+        "reasoning.encrypted_content",
+        "web_search_call.action.sources",
+      ],
     })
     expect(translated.tools).toEqual([
       {
@@ -177,6 +181,10 @@ describe("Anthropic to Responses translation", () => {
     }
 
     expect(translateAnthropicToResponses(payload).reasoning).toBeUndefined()
+    // No web search tool -> no sources include
+    expect(translateAnthropicToResponses(payload).include).toEqual([
+      "reasoning.encrypted_content",
+    ])
   })
 
   test("preserves an explicit no-reasoning effort", () => {
@@ -254,5 +262,65 @@ describe("Responses to Anthropic translation", () => {
         cache_creation_input_tokens: 10,
       },
     })
+  })
+
+  test("translates web search calls into server tool blocks", () => {
+    const response: ResponsesResult = {
+      id: "resp_2",
+      object: "response",
+      model: "gpt-5.6-terra",
+      status: "completed",
+      output: [
+        {
+          id: "ws_1",
+          type: "web_search_call",
+          status: "completed",
+          action: {
+            type: "search",
+            query: "weather boston",
+            sources: [
+              { url: "https://example.com/w", title: "Weather" },
+              { type: "api", url: "" },
+            ],
+          },
+        },
+        {
+          id: "msg_1",
+          type: "message",
+          role: "assistant",
+          status: "completed",
+          content: [{ type: "output_text", text: "It is sunny." }],
+        },
+      ],
+      usage: { input_tokens: 50, output_tokens: 20 },
+    }
+
+    const anthropic = translateResponsesToAnthropic(response)
+
+    expect(anthropic.content).toEqual([
+      {
+        type: "server_tool_use",
+        id: "ws_1",
+        name: "web_search",
+        input: { query: "weather boston" },
+      },
+      {
+        type: "web_search_tool_result",
+        tool_use_id: "ws_1",
+        content: [
+          {
+            type: "web_search_result",
+            url: "https://example.com/w",
+            title: "Weather",
+            page_age: null,
+            encrypted_content: "",
+          },
+        ],
+      },
+      { type: "text", text: "It is sunny." },
+    ])
+    // A completed server-side search is not a client tool_use stop
+    expect(anthropic.stop_reason).toBe("end_turn")
+    expect(anthropic.usage.server_tool_use).toEqual({ web_search_requests: 1 })
   })
 })

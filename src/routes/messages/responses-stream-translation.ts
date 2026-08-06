@@ -1,18 +1,25 @@
 import type {
   ResponseOutputFunctionCall,
   ResponseOutputReasoning,
+  ResponseOutputWebSearchCall,
   ResponsesResult,
 } from "~/services/copilot/create-responses"
 
 import type { AnthropicStreamEventData } from "./anthropic-types"
 
-import { translateResponsesToAnthropic } from "./responses-translation"
+import {
+  translateResponsesToAnthropic,
+  translateWebSearchCallBlocks,
+} from "./responses-translation"
 
 interface StreamBlock {
   index: number
   kind: "text" | "thinking" | "tool_use"
   outputIndex: number
+  contentIndex: number
   hasDelta: boolean
+  closed: boolean
+  summaryIndex?: number
   itemId?: string
   toolCallId?: string
   toolName?: string
@@ -23,7 +30,7 @@ export interface ResponsesStreamState {
   messageCompleted: boolean
   nextBlockIndex: number
   currentBlock?: StreamBlock
-  blocksByOutputIndex: Map<number, StreamBlock>
+  blocks: Map<string, StreamBlock>
   currentResponseId?: string
   currentModel?: string
 }
@@ -33,7 +40,7 @@ export function createResponsesStreamState(): ResponsesStreamState {
     messageStartSent: false,
     messageCompleted: false,
     nextBlockIndex: 0,
-    blocksByOutputIndex: new Map(),
+    blocks: new Map(),
   }
 }
 
@@ -49,10 +56,10 @@ export function translateResponsesStreamEvent(
       return handleOutputItemAdded(event, state)
     }
     case "response.reasoning_summary_text.delta": {
-      return handleTextDelta(event, state, "thinking")
+      return handleThinkingDelta(event, state)
     }
     case "response.output_text.delta": {
-      return handleTextDelta(event, state, "text")
+      return handleTextDelta(event, state)
     }
     case "response.output_text.done": {
       return handleTextDone(event, state)
@@ -87,6 +94,19 @@ export function translateResponsesStreamEvent(
   }
 }
 
+// A text block's identity is (output_index, content_index): one message
+// output item can hold several content parts, and merging them would let
+// deltas for a later part target the earlier, already-stopped block.
+function blockKey(
+  kind: StreamBlock["kind"],
+  outputIndex: number,
+  contentIndex = 0,
+): string {
+  return kind === "text" ?
+      `text:${outputIndex}:${contentIndex}`
+    : `${kind}:${outputIndex}`
+}
+
 function handleOutputItemAdded(
   event: Record<string, unknown>,
   state: ResponsesStreamState,
@@ -100,6 +120,7 @@ function handleOutputItemAdded(
     openBlock(state, events, {
       kind: "thinking",
       outputIndex,
+      contentIndex: 0,
       itemId: getString(item.id),
     })
     return events
@@ -109,13 +130,14 @@ function handleOutputItemAdded(
     const block = openBlock(state, events, {
       kind: "tool_use",
       outputIndex,
+      contentIndex: 0,
       itemId: getString(item.id),
       toolCallId:
         getString(item.call_id) ?? getString(item.id) ?? `tool_${outputIndex}`,
       toolName: getString(item.name) ?? "function",
     })
     const argumentsText = getString(item.arguments)
-    if (argumentsText) {
+    if (argumentsText && !block.closed) {
       events.push(toolArgumentsDelta(block.index, argumentsText))
       block.hasDelta = true
     }
@@ -124,24 +146,63 @@ function handleOutputItemAdded(
   return events
 }
 
-function handleTextDelta(
+function handleThinkingDelta(
   event: Record<string, unknown>,
   state: ResponsesStreamState,
-  kind: "text" | "thinking",
 ): Array<AnthropicStreamEventData> {
   const events = ensureMessageStart(state)
   const delta = getString(event.delta)
   const outputIndex = getNumber(event.output_index) ?? 0
   if (!delta) return events
 
-  const block = openBlock(state, events, { kind, outputIndex })
+  const block = openBlock(state, events, {
+    kind: "thinking",
+    outputIndex,
+    contentIndex: 0,
+  })
+  if (block.closed) return events
+
+  // Separate summary parts the way the non-stream translation joins them.
+  const summaryIndex = getNumber(event.summary_index) ?? 0
+  const needsSeparator =
+    block.hasDelta
+    && block.summaryIndex !== undefined
+    && block.summaryIndex !== summaryIndex
+  block.summaryIndex = summaryIndex
+
   events.push({
     type: "content_block_delta",
     index: block.index,
-    delta:
-      kind === "thinking" ?
-        { type: "thinking_delta", thinking: delta }
-      : { type: "text_delta", text: delta },
+    delta: {
+      type: "thinking_delta",
+      thinking: needsSeparator ? `\n\n${delta}` : delta,
+    },
+  })
+  block.hasDelta = true
+  return events
+}
+
+function handleTextDelta(
+  event: Record<string, unknown>,
+  state: ResponsesStreamState,
+): Array<AnthropicStreamEventData> {
+  const events = ensureMessageStart(state)
+  const delta = getString(event.delta)
+  const outputIndex = getNumber(event.output_index) ?? 0
+  const contentIndex = getNumber(event.content_index) ?? 0
+  if (!delta) return events
+
+  const block = openBlock(state, events, {
+    kind: "text",
+    outputIndex,
+    contentIndex,
+  })
+  if (block.closed) return events
+
+  events.push({
+    type: "content_block_delta",
+    index: block.index,
+    delta: { type: "text_delta", text: delta },
   })
   block.hasDelta = true
   return events
@@ -153,11 +214,12 @@ function handleTextDone(
 ): Array<AnthropicStreamEventData> {
   const events = ensureMessageStart(state)
   const outputIndex = getNumber(event.output_index) ?? 0
-  const block = state.blocksByOutputIndex.get(outputIndex)
+  const contentIndex = getNumber(event.content_index) ?? 0
+  const block = state.blocks.get(blockKey("text", outputIndex, contentIndex))
   if (!block || block.kind !== "text") return events
 
   const text = getString(event.text)
-  if (!block.hasDelta && text) {
+  if (!block.hasDelta && !block.closed && text) {
     events.push({
       type: "content_block_delta",
       index: block.index,
@@ -181,7 +243,9 @@ function handleToolArgumentsDelta(
   const block = openBlock(state, events, {
     kind: "tool_use",
     outputIndex,
+    contentIndex: 0,
   })
+  if (block.closed) return events
   events.push(toolArgumentsDelta(block.index, delta))
   block.hasDelta = true
   return events
@@ -198,9 +262,10 @@ function handleToolArgumentsDone(
   const block = openBlock(state, events, {
     kind: "tool_use",
     outputIndex,
+    contentIndex: 0,
   })
   const argumentsText = getString(event.arguments)
-  if (!block.hasDelta && argumentsText) {
+  if (!block.hasDelta && !block.closed && argumentsText) {
     events.push(toolArgumentsDelta(block.index, argumentsText))
     block.hasDelta = true
   }
@@ -217,48 +282,132 @@ function handleOutputItemDone(
   const item = getRecord(event.item)
   if (outputIndex === undefined || !item) return events
 
-  const block = state.blocksByOutputIndex.get(outputIndex)
+  switch (item.type) {
+    case "web_search_call": {
+      emitWebSearchCall(
+        state,
+        events,
+        item as unknown as ResponseOutputWebSearchCall,
+      )
+      break
+    }
+    case "reasoning": {
+      events.push(
+        ...handleReasoningDone(
+          item as unknown as ResponseOutputReasoning,
+          outputIndex,
+          state,
+        ),
+      )
+      break
+    }
+    case "function_call": {
+      events.push(
+        ...handleFunctionCallDone(
+          item as unknown as ResponseOutputFunctionCall,
+          outputIndex,
+          state,
+        ),
+      )
+      break
+    }
+    default: {
+      // Message items: any of their text blocks not already stopped by
+      // output_text.done is still the current block; close it.
+      if (state.currentBlock?.outputIndex === outputIndex) {
+        closeBlock(state, events, state.currentBlock)
+      }
+    }
+  }
+  return events
+}
+
+function handleReasoningDone(
+  reasoning: ResponseOutputReasoning,
+  outputIndex: number,
+  state: ResponsesStreamState,
+): Array<AnthropicStreamEventData> {
+  const events: Array<AnthropicStreamEventData> = []
+  const block = state.blocks.get(blockKey("thinking", outputIndex))
   if (!block) return events
-
-  if (item.type === "reasoning") {
-    const reasoning = item as unknown as ResponseOutputReasoning
-    if (!block.hasDelta) {
-      const thinking = reasoning.summary
-        ?.map((part) => part.text ?? "")
-        .filter(Boolean)
-        .join("\n\n")
-      events.push({
-        type: "content_block_delta",
-        index: block.index,
-        delta: {
-          type: "thinking_delta",
-          thinking: thinking || "Thinking...",
-        },
-      })
-      block.hasDelta = true
-    }
-    if (reasoning.encrypted_content) {
-      events.push({
-        type: "content_block_delta",
-        index: block.index,
-        delta: {
-          type: "signature_delta",
-          signature: `${reasoning.encrypted_content}@${reasoning.id}`,
-        },
-      })
-    }
+  if (!block.hasDelta && !block.closed) {
+    const thinking = reasoning.summary
+      ?.map((part) => part.text ?? "")
+      .filter(Boolean)
+      .join("\n\n")
+    events.push({
+      type: "content_block_delta",
+      index: block.index,
+      delta: {
+        type: "thinking_delta",
+        thinking: thinking || "Thinking...",
+      },
+    })
+    block.hasDelta = true
   }
-
-  if (item.type === "function_call" && !block.hasDelta) {
-    const call = item as unknown as ResponseOutputFunctionCall
-    if (call.arguments) {
-      events.push(toolArgumentsDelta(block.index, call.arguments))
-      block.hasDelta = true
-    }
+  if (reasoning.encrypted_content && !block.closed) {
+    events.push({
+      type: "content_block_delta",
+      index: block.index,
+      delta: {
+        type: "signature_delta",
+        signature: `${reasoning.encrypted_content}@${reasoning.id}`,
+      },
+    })
   }
-
   closeBlock(state, events, block)
   return events
+}
+
+function handleFunctionCallDone(
+  call: ResponseOutputFunctionCall,
+  outputIndex: number,
+  state: ResponsesStreamState,
+): Array<AnthropicStreamEventData> {
+  const events: Array<AnthropicStreamEventData> = []
+  const block = state.blocks.get(blockKey("tool_use", outputIndex))
+  if (!block) return events
+  if (!block.hasDelta && !block.closed && call.arguments) {
+    events.push(toolArgumentsDelta(block.index, call.arguments))
+    block.hasDelta = true
+  }
+  closeBlock(state, events, block)
+  return events
+}
+
+// Copilot reports web searches only as completed output items; surface
+// them as the Anthropic server_tool_use / web_search_tool_result pair so
+// clients see structured search activity instead of nothing.
+function emitWebSearchCall(
+  state: ResponsesStreamState,
+  events: Array<AnthropicStreamEventData>,
+  call: ResponseOutputWebSearchCall,
+): void {
+  const [toolUse, toolResult] = translateWebSearchCallBlocks(call)
+  closeCurrentBlock(state, events)
+
+  const toolUseIndex = state.nextBlockIndex
+  state.nextBlockIndex += 1
+  events.push(
+    {
+      type: "content_block_start",
+      index: toolUseIndex,
+      content_block: { ...toolUse, input: {} },
+    },
+    toolArgumentsDelta(toolUseIndex, JSON.stringify(toolUse.input)),
+    { type: "content_block_stop", index: toolUseIndex },
+  )
+
+  const resultIndex = state.nextBlockIndex
+  state.nextBlockIndex += 1
+  events.push(
+    {
+      type: "content_block_start",
+      index: resultIndex,
+      content_block: toolResult,
+    },
+    { type: "content_block_stop", index: resultIndex },
+  )
 }
 
 function handleResponseCompleted(
@@ -337,9 +486,10 @@ function ensureMessageStart(
 function openBlock(
   state: ResponsesStreamState,
   events: Array<AnthropicStreamEventData>,
-  details: Omit<StreamBlock, "index" | "hasDelta">,
+  details: Omit<StreamBlock, "index" | "hasDelta" | "closed">,
 ): StreamBlock {
-  const existing = state.blocksByOutputIndex.get(details.outputIndex)
+  const key = blockKey(details.kind, details.outputIndex, details.contentIndex)
+  const existing = state.blocks.get(key)
   if (existing) return existing
 
   closeCurrentBlock(state, events)
@@ -347,10 +497,11 @@ function openBlock(
     ...details,
     index: state.nextBlockIndex,
     hasDelta: false,
+    closed: false,
   }
   state.nextBlockIndex += 1
   state.currentBlock = block
-  state.blocksByOutputIndex.set(block.outputIndex, block)
+  state.blocks.set(key, block)
 
   events.push({
     type: "content_block_start",
@@ -392,8 +543,9 @@ function closeBlock(
   events: Array<AnthropicStreamEventData>,
   block: StreamBlock,
 ): void {
-  if (state.currentBlock?.index !== block.index) return
+  if (block.closed || state.currentBlock?.index !== block.index) return
   events.push({ type: "content_block_stop", index: block.index })
+  block.closed = true
   state.currentBlock = undefined
 }
 
@@ -420,7 +572,7 @@ function resolveOutputIndex(
 
   const itemId = getString(event.item_id)
   if (!itemId) return undefined
-  for (const block of state.blocksByOutputIndex.values()) {
+  for (const block of state.blocks.values()) {
     if (block.itemId === itemId || block.toolCallId === itemId) {
       return block.outputIndex
     }

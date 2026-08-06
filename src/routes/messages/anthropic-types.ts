@@ -1,5 +1,7 @@
 // Anthropic API Types
 
+import type { ChatCompletionChunk } from "~/services/copilot/create-chat-completions"
+
 export interface AnthropicMessagesPayload {
   model: string
   messages: Array<AnthropicMessage>
@@ -184,7 +186,9 @@ export interface AnthropicContentBlockStartEvent {
         input: Record<string, unknown>
       })
     | { type: "thinking"; thinking: string }
-    | AnthropicServerToolUseBlock
+    | (Omit<AnthropicServerToolUseBlock, "input"> & {
+        input: Record<string, unknown>
+      })
     | AnthropicWebSearchToolResultBlock
 }
 
@@ -214,6 +218,9 @@ export interface AnthropicMessageDeltaEvent {
     output_tokens: number
     cache_creation_input_tokens?: number
     cache_read_input_tokens?: number
+    server_tool_use?: {
+      web_search_requests?: number
+    }
   }
 }
 
@@ -246,8 +253,15 @@ export type AnthropicStreamEventData =
 // State for streaming translation
 export interface AnthropicStreamState {
   messageStartSent: boolean
-  contentBlockIndex: number
-  contentBlockOpen: boolean
+  messageCompleted: boolean
+  nextBlockIndex: number
+  // Blocks that have had content_block_start but not content_block_stop.
+  openBlockIndices: Set<number>
+  // Open text block receiving content deltas, if any.
+  textBlockIndex?: number
+  stopReason?: "stop" | "length" | "tool_calls" | "content_filter"
+  // Latest usage seen on any chunk, including trailing usage-only chunks.
+  usage?: ChatCompletionChunk["usage"]
   toolCalls: {
     [openAIToolIndex: number]: {
       id: string

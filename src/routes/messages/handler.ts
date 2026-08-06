@@ -17,10 +17,7 @@ import {
   type ResponsesResult,
 } from "~/services/copilot/create-responses"
 
-import {
-  type AnthropicMessagesPayload,
-  type AnthropicStreamState,
-} from "./anthropic-types"
+import { type AnthropicMessagesPayload } from "./anthropic-types"
 import { selectCopilotMessagesEndpoint } from "./endpoint-selection"
 import {
   translateToAnthropic,
@@ -34,7 +31,11 @@ import {
   translateAnthropicToResponses,
   translateResponsesToAnthropic,
 } from "./responses-translation"
-import { translateChunkToAnthropicEvents } from "./stream-translation"
+import {
+  createAnthropicStreamState,
+  finalizeAnthropicStream,
+  translateChunkToAnthropicEvents,
+} from "./stream-translation"
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
@@ -105,12 +106,7 @@ export async function handleCompletion(c: Context) {
 
   consola.debug("Streaming response from Copilot")
   return streamSSE(c, async (stream) => {
-    const streamState: AnthropicStreamState = {
-      messageStartSent: false,
-      contentBlockIndex: 0,
-      contentBlockOpen: false,
-      toolCalls: {},
-    }
+    const streamState = createAnthropicStreamState()
 
     for await (const rawEvent of response) {
       consola.debug("Copilot raw stream event:", JSON.stringify(rawEvent))
@@ -132,6 +128,14 @@ export async function handleCompletion(c: Context) {
           data: JSON.stringify(event),
         })
       }
+    }
+
+    for (const event of finalizeAnthropicStream(streamState)) {
+      consola.debug("Translated Anthropic event:", JSON.stringify(event))
+      await stream.writeSSE({
+        event: event.type,
+        data: JSON.stringify(event),
+      })
     }
   })
 }

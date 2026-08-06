@@ -20,7 +20,9 @@ export interface ResponsesPayload {
     effort: string
     summary: "auto"
   }
-  include?: Array<"reasoning.encrypted_content">
+  include?: Array<
+    "reasoning.encrypted_content" | "web_search_call.action.sources"
+  >
 }
 
 export type ResponseToolChoice =

@@ -186,3 +186,168 @@ describe("Responses to Anthropic stream translation", () => {
     })
   })
 })
+
+describe("Responses stream block identity and server tools", () => {
+  test("text parts with distinct content_index get separate blocks", () => {
+    const state = createResponsesStreamState()
+
+    const events = [
+      ...translateResponsesStreamEvent(
+        {
+          type: "response.output_text.delta",
+          output_index: 0,
+          content_index: 0,
+          delta: "First part.",
+        },
+        state,
+      ),
+      ...translateResponsesStreamEvent(
+        {
+          type: "response.output_text.done",
+          output_index: 0,
+          content_index: 0,
+          text: "First part.",
+        },
+        state,
+      ),
+      ...translateResponsesStreamEvent(
+        {
+          type: "response.output_text.delta",
+          output_index: 0,
+          content_index: 1,
+          delta: "Second part.",
+        },
+        state,
+      ),
+    ]
+
+    // No delta may target a block that already stopped
+    const stopped = new Set<number>()
+    for (const event of events) {
+      if (event.type === "content_block_stop") stopped.add(event.index)
+      if (event.type === "content_block_delta") {
+        expect(stopped.has(event.index)).toBe(false)
+      }
+    }
+
+    expect(events).toContainEqual({
+      type: "content_block_delta",
+      index: 1,
+      delta: { type: "text_delta", text: "Second part." },
+    })
+  })
+
+  test("separates reasoning summary parts like the non-stream join", () => {
+    const state = createResponsesStreamState()
+
+    const events = [
+      ...translateResponsesStreamEvent(
+        {
+          type: "response.reasoning_summary_text.delta",
+          output_index: 0,
+          summary_index: 0,
+          delta: "Part one.",
+        },
+        state,
+      ),
+      ...translateResponsesStreamEvent(
+        {
+          type: "response.reasoning_summary_text.delta",
+          output_index: 0,
+          summary_index: 1,
+          delta: "Part two.",
+        },
+        state,
+      ),
+    ]
+
+    expect(events).toContainEqual({
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "thinking_delta", thinking: "\n\nPart two." },
+    })
+  })
+
+  test("surfaces web search calls as server tool blocks", () => {
+    const state = createResponsesStreamState()
+
+    const events = [
+      ...translateResponsesStreamEvent(
+        {
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { type: "web_search_call", id: "ws_1", status: "in_progress" },
+        },
+        state,
+      ),
+      ...translateResponsesStreamEvent(
+        {
+          type: "response.output_item.done",
+          output_index: 0,
+          item: {
+            type: "web_search_call",
+            id: "ws_1",
+            status: "completed",
+            action: {
+              type: "search",
+              query: "bun idle timeout",
+              sources: [{ url: "https://example.com", title: "Example" }],
+            },
+          },
+        },
+        state,
+      ),
+      ...translateResponsesStreamEvent(
+        {
+          type: "response.output_text.delta",
+          output_index: 1,
+          content_index: 0,
+          delta: "According to Example...",
+        },
+        state,
+      ),
+    ]
+
+    expect(events).toContainEqual({
+      type: "content_block_start",
+      index: 0,
+      content_block: {
+        type: "server_tool_use",
+        id: "ws_1",
+        name: "web_search",
+        input: {},
+      },
+    })
+    expect(events).toContainEqual({
+      type: "content_block_delta",
+      index: 0,
+      delta: {
+        type: "input_json_delta",
+        partial_json: '{"query":"bun idle timeout"}',
+      },
+    })
+    expect(events).toContainEqual({
+      type: "content_block_start",
+      index: 1,
+      content_block: {
+        type: "web_search_tool_result",
+        tool_use_id: "ws_1",
+        content: [
+          {
+            type: "web_search_result",
+            url: "https://example.com",
+            title: "Example",
+            page_age: null,
+            encrypted_content: "",
+          },
+        ],
+      },
+    })
+    // Text after the search lands in its own block
+    expect(events).toContainEqual({
+      type: "content_block_delta",
+      index: 2,
+      delta: { type: "text_delta", text: "According to Example..." },
+    })
+  })
+})
