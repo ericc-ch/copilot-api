@@ -1,5 +1,7 @@
 // Anthropic API Types
 
+import type { ChatCompletionChunk } from "~/services/copilot/create-chat-completions"
+
 export interface AnthropicMessagesPayload {
   model: string
   messages: Array<AnthropicMessage>
@@ -19,8 +21,11 @@ export interface AnthropicMessagesPayload {
     name?: string
   }
   thinking?: {
-    type: "enabled"
+    type: "adaptive" | "enabled"
     budget_tokens?: number
+  }
+  output_config?: {
+    effort?: "none" | "low" | "medium" | "high" | "xhigh" | "max"
   }
   service_tier?: "auto" | "standard_only"
 }
@@ -42,7 +47,7 @@ export interface AnthropicImageBlock {
 export interface AnthropicToolResultBlock {
   type: "tool_result"
   tool_use_id: string
-  content: string
+  content: string | Array<AnthropicTextBlock | AnthropicImageBlock>
   is_error?: boolean
 }
 
@@ -56,6 +61,30 @@ export interface AnthropicToolUseBlock {
 export interface AnthropicThinkingBlock {
   type: "thinking"
   thinking: string
+  signature?: string
+}
+
+export interface AnthropicServerToolUseBlock {
+  type: "server_tool_use"
+  id: string
+  name: "web_search"
+  input: {
+    query: string
+  }
+}
+
+export interface AnthropicWebSearchResult {
+  type: "web_search_result"
+  url: string
+  title: string
+  page_age: string | null
+  encrypted_content: string
+}
+
+export interface AnthropicWebSearchToolResultBlock {
+  type: "web_search_tool_result"
+  tool_use_id: string
+  content: Array<AnthropicWebSearchResult>
 }
 
 export type AnthropicUserContentBlock =
@@ -67,6 +96,8 @@ export type AnthropicAssistantContentBlock =
   | AnthropicTextBlock
   | AnthropicToolUseBlock
   | AnthropicThinkingBlock
+  | AnthropicServerToolUseBlock
+  | AnthropicWebSearchToolResultBlock
 
 export interface AnthropicUserMessage {
   role: "user"
@@ -80,11 +111,29 @@ export interface AnthropicAssistantMessage {
 
 export type AnthropicMessage = AnthropicUserMessage | AnthropicAssistantMessage
 
-export interface AnthropicTool {
+export interface AnthropicClientTool {
   name: string
   description?: string
   input_schema: Record<string, unknown>
 }
+
+export interface AnthropicWebSearchTool {
+  type: `web_search_${string}`
+  name: "web_search"
+  max_uses?: number
+  allowed_domains?: Array<string>
+  blocked_domains?: Array<string>
+  user_location?: {
+    type: "approximate"
+    city?: string
+    region?: string
+    country?: string
+    timezone?: string
+  }
+  allowed_callers?: Array<"direct" | "code_execution_20250825">
+}
+
+export type AnthropicTool = AnthropicClientTool | AnthropicWebSearchTool
 
 export interface AnthropicResponse {
   id: string
@@ -106,6 +155,9 @@ export interface AnthropicResponse {
     output_tokens: number
     cache_creation_input_tokens?: number
     cache_read_input_tokens?: number
+    server_tool_use?: {
+      web_search_requests?: number
+    }
     service_tier?: "standard" | "priority" | "batch"
   }
 }
@@ -134,6 +186,10 @@ export interface AnthropicContentBlockStartEvent {
         input: Record<string, unknown>
       })
     | { type: "thinking"; thinking: string }
+    | (Omit<AnthropicServerToolUseBlock, "input"> & {
+        input: Record<string, unknown>
+      })
+    | AnthropicWebSearchToolResultBlock
 }
 
 export interface AnthropicContentBlockDeltaEvent {
@@ -162,6 +218,9 @@ export interface AnthropicMessageDeltaEvent {
     output_tokens: number
     cache_creation_input_tokens?: number
     cache_read_input_tokens?: number
+    server_tool_use?: {
+      web_search_requests?: number
+    }
   }
 }
 
@@ -194,8 +253,15 @@ export type AnthropicStreamEventData =
 // State for streaming translation
 export interface AnthropicStreamState {
   messageStartSent: boolean
-  contentBlockIndex: number
-  contentBlockOpen: boolean
+  messageCompleted: boolean
+  nextBlockIndex: number
+  // Blocks that have had content_block_start but not content_block_stop.
+  openBlockIndices: Set<number>
+  // Open text block receiving content deltas, if any.
+  textBlockIndex?: number
+  stopReason?: "stop" | "length" | "tool_calls" | "content_filter"
+  // Latest usage seen on any chunk, including trailing usage-only chunks.
+  usage?: ChatCompletionChunk["usage"]
   toolCalls: {
     [openAIToolIndex: number]: {
       id: string

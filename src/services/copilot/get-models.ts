@@ -28,6 +28,8 @@ interface ModelSupports {
   tool_calls?: boolean
   parallel_tool_calls?: boolean
   dimensions?: boolean
+  reasoning_effort?: Array<string>
+  [capability: string]: unknown
 }
 
 interface ModelCapabilities {
@@ -43,9 +45,11 @@ export interface Model {
   capabilities: ModelCapabilities
   id: string
   model_picker_enabled: boolean
+  model_picker_category?: string
   name: string
   object: string
   preview: boolean
+  supported_endpoints?: Array<string>
   vendor: string
   version: string
   policy?: {
