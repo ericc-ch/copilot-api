@@ -154,6 +154,7 @@ The following command line options are available for the `start` command:
 | Option         | Description                                                                   | Default    | Alias |
 | -------------- | ----------------------------------------------------------------------------- | ---------- | ----- |
 | --port         | Port to listen on                                                             | 4141       | -p    |
+| --listen-addr  | Address to bind the server to (for example 127.0.0.1, 0.0.0.0, or ::1)       | all interfaces | none  |
 | --verbose      | Enable verbose logging                                                        | false      | -v    |
 | --account-type | Account type to use (individual, business, enterprise)                        | individual | -a    |
 | --manual       | Enable manual request approval                                                | false      | none  |
@@ -219,6 +220,9 @@ npx copilot-api@latest start
 
 # Run on custom port with verbose logging
 npx copilot-api@latest start --port 8080 --verbose
+
+# Bind to localhost only instead of all interfaces
+npx copilot-api@latest start --port 8080 --listen-addr 127.0.0.1
 
 # Use with a business plan GitHub account
 npx copilot-api@latest start --account-type business
