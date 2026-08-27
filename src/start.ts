@@ -16,6 +16,7 @@ import { server } from "./server"
 
 interface RunServerOptions {
   port: number
+  listenAddr?: string
   verbose: boolean
   accountType: string
   manual: boolean
@@ -25,6 +26,22 @@ interface RunServerOptions {
   claudeCode: boolean
   showToken: boolean
   proxyEnv: boolean
+}
+
+function isAllInterfacesListenAddr(listenAddr: string): boolean {
+  return ["::", "[::]", "0.0.0.0"].includes(listenAddr)
+}
+
+function formatHostForUrl(host: string): string {
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host
+}
+
+export function getServerUrl(port: number, listenAddr?: string): string {
+  if (!listenAddr || isAllInterfacesListenAddr(listenAddr)) {
+    return `http://localhost:${port}`
+  }
+
+  return `http://${formatHostForUrl(listenAddr)}:${port}`
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -64,7 +81,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
   )
 
-  const serverUrl = `http://localhost:${options.port}`
+  const serverUrl = getServerUrl(options.port, options.listenAddr)
 
   if (options.claudeCode) {
     invariant(state.models, "Models should be loaded by now")
@@ -117,6 +134,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   serve({
     fetch: server.fetch as ServerHandler,
     port: options.port,
+    hostname: options.listenAddr,
   })
 }
 
@@ -131,6 +149,11 @@ export const start = defineCommand({
       type: "string",
       default: "4141",
       description: "Port to listen on",
+    },
+    "listen-addr": {
+      type: "string",
+      description:
+        "Address to bind the server to (for example 127.0.0.1, 0.0.0.0, or ::1)",
     },
     verbose: {
       alias: "v",
@@ -193,6 +216,7 @@ export const start = defineCommand({
 
     return runServer({
       port: Number.parseInt(args.port, 10),
+      listenAddr: args["listen-addr"],
       verbose: args.verbose,
       accountType: args["account-type"],
       manual: args.manual,
