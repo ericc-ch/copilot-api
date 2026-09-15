@@ -52,4 +52,11 @@ export interface Model {
     state: string
     terms: string
   }
+  // Present on newer models to say which upstream endpoint(s) accept them -
+  // e.g. the GPT reasoning family (gpt-5.x/6.x) only lists "/responses",
+  // NOT "/chat/completions". Absent on older models, which are implicitly
+  // /chat/completions-only. See create-chat-completions.ts, which reroutes
+  // through /responses (lib/responses-translation.ts) for models that
+  // don't list /chat/completions here.
+  supported_endpoints?: Array<string>
 }
