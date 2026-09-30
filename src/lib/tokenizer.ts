@@ -143,7 +143,7 @@ const getEncodeChatFunction = async (encoding: string): Promise<Encoder> => {
  * Get tokenizer type from model information
  */
 export const getTokenizerFromModel = (model: Model): string => {
-  return model.capabilities.tokenizer || "o200k_base"
+  return model.capabilities?.tokenizer ?? "o200k_base"
 }
 
 /**

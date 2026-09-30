@@ -9,6 +9,13 @@ import { createChatCompletions } from "../src/services/copilot/create-chat-compl
 state.copilotToken = "test-token"
 state.vsCodeVersion = "1.0.0"
 state.accountType = "individual"
+// Pre-seed a valid session so createChatCompletions does not hit
+// the /models/session endpoint in these tests
+state.modelSession = {
+  token: "test-session",
+  availableModels: [],
+  expiresAt: Date.now() + 60_000,
+}
 
 // Helper to mock fetch
 const fetchMock = mock(

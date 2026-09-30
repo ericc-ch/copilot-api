@@ -38,6 +38,7 @@ interface CopilotUsageResponse {
   can_signup_for_limited: boolean
   chat_enabled: boolean
   copilot_plan: string
+  endpoints?: { proxy?: string; [key: string]: string | undefined }
   organization_login_list: Array<unknown>
   organization_list: Array<unknown>
   quota_reset_date: string

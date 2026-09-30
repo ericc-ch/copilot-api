@@ -1,3 +1,4 @@
+import type { ModelSession } from "~/services/copilot/create-model-session"
 import type { ModelsResponse } from "~/services/copilot/get-models"
 
 export interface State {
@@ -6,6 +7,8 @@ export interface State {
 
   accountType: string
   models?: ModelsResponse
+  modelSession?: ModelSession
+  proxyBaseUrl?: string
   vsCodeVersion?: string
 
   manualApprove: boolean

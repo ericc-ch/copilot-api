@@ -16,6 +16,7 @@ import { server } from "./server"
 
 interface RunServerOptions {
   port: number
+  hostname: string
   verbose: boolean
   accountType: string
   manual: boolean
@@ -117,6 +118,7 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   serve({
     fetch: server.fetch as ServerHandler,
     port: options.port,
+    hostname: options.hostname,
   })
 }
 
@@ -131,6 +133,12 @@ export const start = defineCommand({
       type: "string",
       default: "4141",
       description: "Port to listen on",
+    },
+    hostname: {
+      type: "string",
+      default: "0.0.0.0",
+      description:
+        "Hostname/interface to listen on (use 127.0.0.1 for local-only access)",
     },
     verbose: {
       alias: "v",
@@ -193,6 +201,7 @@ export const start = defineCommand({
 
     return runServer({
       port: Number.parseInt(args.port, 10),
+      hostname: args.hostname,
       verbose: args.verbose,
       accountType: args["account-type"],
       manual: args.manual,

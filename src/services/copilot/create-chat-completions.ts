@@ -4,6 +4,15 @@ import { events } from "fetch-event-stream"
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
+import { modelSessionHeaders } from "~/services/copilot/create-model-session"
+import { createResponses } from "~/services/copilot/create-responses"
+import {
+  chatPayloadToResponsesPayload,
+  isResponsesOnlyModel,
+  responsesResultToChatCompletion,
+  streamResponsesAsChatChunks,
+  type ResponsesResult,
+} from "~/services/copilot/responses-adapter"
 
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
@@ -22,10 +31,35 @@ export const createChatCompletions = async (
     ["assistant", "tool"].includes(msg.role),
   )
 
+  // Models that only serve the Responses API (gpt-5.3-codex, gpt-5.4-mini,
+  // ...) are handled via protocol translation so clients can keep using the
+  // Chat Completions format
+  if (isResponsesOnlyModel(payload.model)) {
+    const responsesPayload = chatPayloadToResponsesPayload(payload)
+    const upstream = await createResponses(
+      responsesPayload as Parameters<typeof createResponses>[0],
+      { vision: enableVision, initiator: isAgentCall ? "agent" : "user" },
+    )
+
+    if (payload.stream) {
+      return streamResponsesAsChatChunks(upstream, payload.model, events)
+    }
+
+    return responsesResultToChatCompletion(
+      (await upstream.json()) as ResponsesResult,
+      payload.model,
+    )
+  }
+
+  // Some models (e.g. Claude on limited SKUs) are only served through the
+  // auto-mode session flow and require the Copilot-Session-Token header
+  const sessionHeaders = await modelSessionHeaders(payload.model)
+
   // Build headers and add X-Initiator
   const headers: Record<string, string> = {
     ...copilotHeaders(state, enableVision),
     "X-Initiator": isAgentCall ? "agent" : "user",
+    ...sessionHeaders,
   }
 
   const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
@@ -130,6 +164,7 @@ export interface ChatCompletionsPayload {
   temperature?: number | null
   top_p?: number | null
   max_tokens?: number | null
+  max_completion_tokens?: number | null
   stop?: string | Array<string> | null
   n?: number | null
   stream?: boolean | null
