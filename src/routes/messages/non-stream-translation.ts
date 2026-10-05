@@ -68,6 +68,14 @@ function translateAnthropicMessagesToOpenAI(
     : handleAssistantMessage(message),
   )
 
+  const lastMessage = otherMessages.at(-1)
+  if (
+    lastMessage?.role === "assistant"
+    && (!lastMessage.tool_calls || lastMessage.tool_calls.length === 0)
+  ) {
+    otherMessages.push({ role: "user", content: "Continue." })
+  }
+
   return [...systemMessages, ...otherMessages]
 }
 

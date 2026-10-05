@@ -1,5 +1,6 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
+import { getGlobalDispatcher, type Dispatcher } from "undici"
 
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
@@ -7,6 +8,7 @@ import { state } from "~/lib/state"
 
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
+  signal?: AbortSignal,
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
@@ -28,11 +30,17 @@ export const createChatCompletions = async (
     "X-Initiator": isAgentCall ? "agent" : "user",
   }
 
-  const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
+  const requestInit: RequestInit & { dispatcher: Dispatcher } = {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
-  })
+    signal,
+    dispatcher: getGlobalDispatcher(),
+  }
+  const response = await fetch(
+    `${copilotBaseUrl(state)}/chat/completions`,
+    requestInit,
+  )
 
   if (!response.ok) {
     consola.error("Failed to create chat completions", response)
@@ -40,7 +48,7 @@ export const createChatCompletions = async (
   }
 
   if (payload.stream) {
-    return events(response)
+    return events(response, signal)
   }
 
   return (await response.json()) as ChatCompletionResponse

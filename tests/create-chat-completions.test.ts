@@ -54,3 +54,16 @@ test("sets X-Initiator to user if only user present", async () => {
   ).headers
   expect(headers["X-Initiator"]).toBe("user")
 })
+
+test("passes the request abort signal to the upstream fetch", async () => {
+  const payload: ChatCompletionsPayload = {
+    messages: [{ role: "user", content: "hi" }],
+    model: "gpt-test",
+  }
+  const controller = new AbortController()
+
+  await createChatCompletions(payload, controller.signal)
+
+  const options = fetchMock.mock.calls.at(-1)?.[1] as RequestInit
+  expect(options.signal).toBe(controller.signal)
+})
