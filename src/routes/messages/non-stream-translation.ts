@@ -68,6 +68,16 @@ function translateAnthropicMessagesToOpenAI(
     : handleAssistantMessage(message),
   )
 
+  // Newer Claude models reject requests whose message list ends on an
+  // assistant turn ("assistant message prefill" is no longer supported).
+  // Append a placeholder user turn so the conversation always ends on
+  // "user". An empty string is silently dropped upstream, so a non-empty
+  // placeholder is required.
+  const lastMessage = otherMessages.at(-1)
+  if (lastMessage?.role === "assistant") {
+    otherMessages.push({ role: "user", content: "Continue." })
+  }
+
   return [...systemMessages, ...otherMessages]
 }
 
