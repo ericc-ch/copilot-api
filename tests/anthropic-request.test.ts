@@ -197,6 +197,46 @@ describe("Anthropic to OpenAI translation logic", () => {
     expect(assistantMessage?.tool_calls).toHaveLength(1)
     expect(assistantMessage?.tool_calls?.[0].function.name).toBe("get_weather")
   })
+
+  test("should append a trailing user turn when the message list would otherwise end on assistant", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-sonnet-5",
+      messages: [
+        { role: "user", content: "Hi" },
+        { role: "assistant", content: "Hello" },
+      ],
+      max_tokens: 20,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+
+    const lastMessage = openAIPayload.messages.at(-1)
+    expect(lastMessage?.role).toBe("user")
+    // The placeholder must be non-empty, since some backends silently drop
+    // empty-string user turns, which would leave the conversation ending on
+    // an assistant message again.
+    expect(lastMessage?.content).not.toBe("")
+  })
+
+  test("should not append a trailing user turn when the message list already ends on user", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-sonnet-5",
+      messages: [
+        { role: "user", content: "Hi" },
+        { role: "assistant", content: "Hello" },
+        { role: "user", content: "How are you?" },
+      ],
+      max_tokens: 20,
+    }
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+    expect(isValidChatCompletionRequest(openAIPayload)).toBe(true)
+
+    const nonSystemMessages = openAIPayload.messages.filter(
+      (m) => m.role !== "system",
+    )
+    expect(nonSystemMessages).toHaveLength(3)
+    expect(nonSystemMessages.at(-1)?.content).toBe("How are you?")
+  })
 })
 
 describe("OpenAI Chat Completion v1 Request Payload Validation with Zod", () => {
