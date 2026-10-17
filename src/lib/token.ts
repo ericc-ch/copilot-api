@@ -29,17 +29,34 @@ export const setupCopilotToken = async () => {
   setInterval(async () => {
     consola.debug("Refreshing Copilot token")
     try {
+      await refreshCopilotToken()
+    } catch (error) {
+      consola.error("Failed to refresh Copilot token:", error)
+    }
+  }, refreshInterval)
+}
+
+let inflightRefresh: Promise<void> | undefined
+
+/**
+ * Fetch a new Copilot token and store it in state. Concurrent callers share
+ * one in-flight request, so a burst of 401/403 responses triggers a single
+ * refresh.
+ */
+export const refreshCopilotToken = (): Promise<void> => {
+  inflightRefresh ??= (async () => {
+    try {
       const { token } = await getCopilotToken()
       state.copilotToken = token
       consola.debug("Copilot token refreshed")
       if (state.showToken) {
         consola.info("Refreshed Copilot token:", token)
       }
-    } catch (error) {
-      consola.error("Failed to refresh Copilot token:", error)
-      throw error
+    } finally {
+      inflightRefresh = undefined
     }
-  }, refreshInterval)
+  })()
+  return inflightRefresh
 }
 
 interface SetupGitHubTokenOptions {
