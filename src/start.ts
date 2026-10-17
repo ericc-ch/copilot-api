@@ -7,7 +7,7 @@ import { serve, type ServerHandler } from "srvx"
 import invariant from "tiny-invariant"
 
 import { ensurePaths } from "./lib/paths"
-import { initProxyFromEnv } from "./lib/proxy"
+import { initDirectConnectionPool, initProxyFromEnv } from "./lib/proxy"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
 import { setupCopilotToken, setupGitHubToken } from "./lib/token"
@@ -30,6 +30,8 @@ interface RunServerOptions {
 export async function runServer(options: RunServerOptions): Promise<void> {
   if (options.proxyEnv) {
     initProxyFromEnv()
+  } else {
+    initDirectConnectionPool()
   }
 
   if (options.verbose) {

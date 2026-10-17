@@ -2,11 +2,29 @@ import consola from "consola"
 import { getProxyForUrl } from "proxy-from-env"
 import { Agent, ProxyAgent, setGlobalDispatcher, type Dispatcher } from "undici"
 
+const MAX_CONNECTIONS_PER_ORIGIN = 16
+
+function createDirectAgent(): Agent {
+  return new Agent({
+    connections: MAX_CONNECTIONS_PER_ORIGIN,
+    pipelining: 1,
+  })
+}
+
+export function initDirectConnectionPool(): void {
+  if (typeof Bun !== "undefined") return
+
+  setGlobalDispatcher(createDirectAgent())
+  consola.debug(
+    `HTTP connection pool configured with ${MAX_CONNECTIONS_PER_ORIGIN} connections per origin`,
+  )
+}
+
 export function initProxyFromEnv(): void {
   if (typeof Bun !== "undefined") return
 
   try {
-    const direct = new Agent()
+    const direct = createDirectAgent()
     const proxies = new Map<string, ProxyAgent>()
 
     // We only need a minimal dispatcher that implements `dispatch` at runtime.

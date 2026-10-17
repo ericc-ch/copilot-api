@@ -1,12 +1,15 @@
 import consola from "consola"
 import { events } from "fetch-event-stream"
+import { getGlobalDispatcher, type Dispatcher } from "undici"
 
 import { copilotHeaders, copilotBaseUrl } from "~/lib/api-config"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
+import { refreshCopilotToken } from "~/lib/token"
 
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
+  signal?: AbortSignal,
 ) => {
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
@@ -22,17 +25,40 @@ export const createChatCompletions = async (
     ["assistant", "tool"].includes(msg.role),
   )
 
-  // Build headers and add X-Initiator
-  const headers: Record<string, string> = {
-    ...copilotHeaders(state, enableVision),
-    "X-Initiator": isAgentCall ? "agent" : "user",
+  const body = JSON.stringify(payload)
+  const send = () => {
+    // Build headers (with the current Copilot token) and add X-Initiator
+    const headers: Record<string, string> = {
+      ...copilotHeaders(state, enableVision),
+      "X-Initiator": isAgentCall ? "agent" : "user",
+    }
+
+    const requestInit: RequestInit & { dispatcher: Dispatcher } = {
+      method: "POST",
+      headers,
+      body,
+      signal,
+      dispatcher: getGlobalDispatcher(),
+    }
+    return fetch(`${copilotBaseUrl(state)}/chat/completions`, requestInit)
   }
 
-  const response = await fetch(`${copilotBaseUrl(state)}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  })
+  let response = await send()
+
+  // The Copilot token can be revoked server-side before its scheduled
+  // refresh. On 401/403, fetch a fresh token and retry once.
+  if (response.status === 401 || response.status === 403) {
+    consola.warn(
+      `Copilot returned ${response.status}, refreshing Copilot token and retrying`,
+    )
+    try {
+      await refreshCopilotToken()
+      await response.body?.cancel()
+      response = await send()
+    } catch (error) {
+      consola.error("Failed to refresh Copilot token:", error)
+    }
+  }
 
   if (!response.ok) {
     consola.error("Failed to create chat completions", response)
@@ -40,7 +66,7 @@ export const createChatCompletions = async (
   }
 
   if (payload.stream) {
-    return events(response)
+    return events(response, signal)
   }
 
   return (await response.json()) as ChatCompletionResponse

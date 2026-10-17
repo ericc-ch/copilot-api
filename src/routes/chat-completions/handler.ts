@@ -18,7 +18,9 @@ export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   let payload = await c.req.json<ChatCompletionsPayload>()
-  consola.debug("Request payload:", JSON.stringify(payload).slice(-400))
+  if (consola.level >= 4) {
+    consola.debug("Request payload:", JSON.stringify(payload).slice(-400))
+  }
 
   // Find the selected model
   const selectedModel = state.models?.data.find(
@@ -47,20 +49,50 @@ export async function handleCompletion(c: Context) {
     consola.debug("Set max_tokens to:", JSON.stringify(payload.max_tokens))
   }
 
-  const response = await createChatCompletions(payload)
+  if (payload.stream) {
+    consola.debug("Streaming response")
+    return streamSSE(
+      c,
+      async (stream) => {
+        const controller = new AbortController()
+        stream.onAbort(() => {
+          controller.abort()
+        })
 
-  if (isNonStreaming(response)) {
-    consola.debug("Non-streaming response:", JSON.stringify(response))
-    return c.json(response)
+        const response = await createChatCompletions(payload, controller.signal)
+        if (isNonStreaming(response)) {
+          throw new Error("Expected a streaming response from Copilot")
+        }
+
+        try {
+          for await (const chunk of response) {
+            if (consola.level >= 4) {
+              consola.debug("Streaming chunk:", JSON.stringify(chunk))
+            }
+            await stream.writeSSE(chunk as SSEMessage)
+          }
+        } finally {
+          controller.abort()
+        }
+      },
+      (error) => {
+        if (error.name !== "AbortError") {
+          consola.error("Streaming request failed:", error)
+        }
+        return Promise.resolve()
+      },
+    )
   }
 
-  consola.debug("Streaming response")
-  return streamSSE(c, async (stream) => {
-    for await (const chunk of response) {
-      consola.debug("Streaming chunk:", JSON.stringify(chunk))
-      await stream.writeSSE(chunk as SSEMessage)
-    }
-  })
+  const response = await createChatCompletions(payload)
+  if (!isNonStreaming(response)) {
+    throw new Error("Expected a non-streaming response from Copilot")
+  }
+
+  if (consola.level >= 4) {
+    consola.debug("Non-streaming response:", JSON.stringify(response))
+  }
+  return c.json(response)
 }
 
 const isNonStreaming = (

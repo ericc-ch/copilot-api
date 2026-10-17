@@ -26,64 +26,118 @@ export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
 
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
-  consola.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
+  if (consola.level >= 4) {
+    consola.debug(
+      "Anthropic request payload:",
+      JSON.stringify(anthropicPayload),
+    )
+  }
 
   const openAIPayload = translateToOpenAI(anthropicPayload)
-  consola.debug(
-    "Translated OpenAI request payload:",
-    JSON.stringify(openAIPayload),
-  )
+  if (consola.level >= 4) {
+    consola.debug(
+      "Translated OpenAI request payload:",
+      JSON.stringify(openAIPayload),
+    )
+  }
 
   if (state.manualApprove) {
     await awaitApproval()
   }
 
-  const response = await createChatCompletions(openAIPayload)
+  if (openAIPayload.stream) {
+    consola.debug("Streaming response from Copilot")
+    return streamSSE(
+      c,
+      async (stream) => {
+        const controller = new AbortController()
+        stream.onAbort(() => {
+          controller.abort()
+        })
 
-  if (isNonStreaming(response)) {
+        const response = await createChatCompletions(
+          openAIPayload,
+          controller.signal,
+        )
+        if (isNonStreaming(response)) {
+          throw new Error("Expected a streaming response from Copilot")
+        }
+
+        try {
+          await writeStreamingResponse(stream, response)
+        } finally {
+          controller.abort()
+        }
+      },
+      (error) => {
+        if (error.name !== "AbortError") {
+          consola.error("Streaming request failed:", error)
+        }
+        return Promise.resolve()
+      },
+    )
+  }
+
+  const response = await createChatCompletions(openAIPayload)
+  if (!isNonStreaming(response)) {
+    throw new Error("Expected a non-streaming response from Copilot")
+  }
+
+  if (consola.level >= 4) {
     consola.debug(
       "Non-streaming response from Copilot:",
       JSON.stringify(response).slice(-400),
     )
-    const anthropicResponse = translateToAnthropic(response)
+  }
+  const anthropicResponse = translateToAnthropic(response)
+  if (consola.level >= 4) {
     consola.debug(
       "Translated Anthropic response:",
       JSON.stringify(anthropicResponse),
     )
-    return c.json(anthropicResponse)
+  }
+  return c.json(anthropicResponse)
+}
+
+async function writeStreamingResponse(
+  stream: Parameters<Parameters<typeof streamSSE>[1]>[0],
+  response: Exclude<
+    Awaited<ReturnType<typeof createChatCompletions>>,
+    ChatCompletionResponse
+  >,
+): Promise<void> {
+  const streamState: AnthropicStreamState = {
+    messageStartSent: false,
+    contentBlockIndex: 0,
+    contentBlockOpen: false,
+    toolCalls: {},
   }
 
-  consola.debug("Streaming response from Copilot")
-  return streamSSE(c, async (stream) => {
-    const streamState: AnthropicStreamState = {
-      messageStartSent: false,
-      contentBlockIndex: 0,
-      contentBlockOpen: false,
-      toolCalls: {},
-    }
-
-    for await (const rawEvent of response) {
+  for await (const rawEvent of response) {
+    if (consola.level >= 4) {
       consola.debug("Copilot raw stream event:", JSON.stringify(rawEvent))
-      if (rawEvent.data === "[DONE]") {
-        break
-      }
-
-      if (!rawEvent.data) {
-        continue
-      }
-
-      const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
-      const events = translateChunkToAnthropicEvents(chunk, streamState)
-
-      for (const event of events) {
-        consola.debug("Translated Anthropic event:", JSON.stringify(event))
-        await stream.writeSSE({
-          event: event.type,
-          data: JSON.stringify(event),
-        })
-      }
     }
-  })
+    if (rawEvent.data === "[DONE]") {
+      break
+    }
+
+    if (!rawEvent.data) {
+      continue
+    }
+
+    const chunk = JSON.parse(rawEvent.data) as ChatCompletionChunk
+    const events = translateChunkToAnthropicEvents(chunk, streamState)
+
+    for (const event of events) {
+      if (consola.level >= 4) {
+        consola.debug("Translated Anthropic event:", JSON.stringify(event))
+      }
+      await stream.writeSSE({
+        event: event.type,
+        data: JSON.stringify(event),
+      })
+    }
+  }
 }
 
 const isNonStreaming = (

@@ -154,6 +154,32 @@ describe("Anthropic to OpenAI translation logic", () => {
       "Let me think about this simple math problem...",
     )
     expect(assistantMessage?.content).toContain("2+2 equals 4.")
+    expect(openAIPayload.messages.at(-1)).toEqual({
+      role: "user",
+      content: "Continue.",
+    })
+  })
+
+  test("should convert assistant prefill into a user-ended conversation", () => {
+    const anthropicPayload: AnthropicMessagesPayload = {
+      model: "claude-opus-5.5",
+      messages: [
+        { role: "user", content: "Complete this response." },
+        { role: "assistant", content: "The answer is" },
+      ],
+      max_tokens: 100,
+    }
+
+    const openAIPayload = translateToOpenAI(anthropicPayload)
+
+    expect(openAIPayload.messages.at(-2)).toEqual({
+      role: "assistant",
+      content: "The answer is",
+    })
+    expect(openAIPayload.messages.at(-1)).toEqual({
+      role: "user",
+      content: "Continue.",
+    })
   })
 
   test("should handle thinking blocks with tool calls", () => {
