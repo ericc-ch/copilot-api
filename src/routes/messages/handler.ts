@@ -17,6 +17,10 @@ import {
   type AnthropicStreamState,
 } from "./anthropic-types"
 import {
+  handleNativeCompletion,
+  shouldUseNativeMessages,
+} from "./native-handler"
+import {
   translateToAnthropic,
   translateToOpenAI,
 } from "./non-stream-translation"
@@ -28,15 +32,19 @@ export async function handleCompletion(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()
   consola.debug("Anthropic request payload:", JSON.stringify(anthropicPayload))
 
+  if (state.manualApprove) {
+    await awaitApproval()
+  }
+
+  if (shouldUseNativeMessages(anthropicPayload)) {
+    return handleNativeCompletion(anthropicPayload, c.req.raw.headers)
+  }
+
   const openAIPayload = translateToOpenAI(anthropicPayload)
   consola.debug(
     "Translated OpenAI request payload:",
     JSON.stringify(openAIPayload),
   )
-
-  if (state.manualApprove) {
-    await awaitApproval()
-  }
 
   const response = await createChatCompletions(openAIPayload)
 

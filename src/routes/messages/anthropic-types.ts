@@ -19,8 +19,13 @@ export interface AnthropicMessagesPayload {
     name?: string
   }
   thinking?: {
-    type: "enabled"
+    // "enabled", "adaptive", "disabled", "between_tools", depending on model
+    type: string
     budget_tokens?: number
+    display?: string
+  }
+  output_config?: {
+    effort?: string
   }
   service_tier?: "auto" | "standard_only"
 }

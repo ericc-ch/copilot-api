@@ -151,18 +151,19 @@ Copilot API now uses a subcommand structure with these main commands:
 
 The following command line options are available for the `start` command:
 
-| Option         | Description                                                                   | Default    | Alias |
-| -------------- | ----------------------------------------------------------------------------- | ---------- | ----- |
-| --port         | Port to listen on                                                             | 4141       | -p    |
-| --verbose      | Enable verbose logging                                                        | false      | -v    |
-| --account-type | Account type to use (individual, business, enterprise)                        | individual | -a    |
-| --manual       | Enable manual request approval                                                | false      | none  |
-| --rate-limit   | Rate limit in seconds between requests                                        | none       | -r    |
-| --wait         | Wait instead of error when rate limit is hit                                  | false      | -w    |
-| --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand) | none       | -g    |
-| --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
-| --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
-| --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
+| Option               | Description                                                                   | Default    | Alias |
+| -------------------- | ----------------------------------------------------------------------------- | ---------- | ----- |
+| --port               | Port to listen on                                                             | 4141       | -p    |
+| --verbose            | Enable verbose logging                                                        | false      | -v    |
+| --account-type       | Account type to use (individual, business, enterprise)                        | individual | -a    |
+| --manual             | Enable manual request approval                                                | false      | none  |
+| --rate-limit         | Rate limit in seconds between requests                                        | none       | -r    |
+| --wait               | Wait instead of error when rate limit is hit                                  | false      | -w    |
+| --github-token       | Provide GitHub token directly (must be generated using the `auth` subcommand) | none       | -g    |
+| --claude-code        | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
+| --show-token         | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
+| --proxy-env          | Initialize proxy from environment variables                                   | false      | none  |
+| --no-native-messages | Translate Claude models via /chat/completions instead of native /v1/messages  | false      | none  |
 
 ### Auth Command Options
 
